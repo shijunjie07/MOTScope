@@ -1,4 +1,18 @@
 const datasetSelect = document.getElementById("datasetSelect");
+const fileMenuBtn = document.getElementById("fileMenuBtn");
+const fileMenuDropdown = document.getElementById("fileMenuDropdown");
+const viewMenuBtn = document.getElementById("viewMenuBtn");
+const viewMenuDropdown = document.getElementById("viewMenuDropdown");
+const viewerWorkspace = document.querySelector(".viewer-workspace");
+const canvasBackgroundSelect = document.getElementById("canvasBackgroundSelect");
+const canvasBgMenuBtn = document.getElementById("canvasBgMenuBtn");
+const canvasBgMenu = document.getElementById("canvasBgMenu");
+const viewerStage = document.querySelector(".viewer-stage");
+const themeLightBtn = document.getElementById("themeLightBtn");
+const themeDarkBtn = document.getElementById("themeDarkBtn");
+const themeToggleBtn = document.getElementById("themeToggleBtn");
+const refreshMenuBtn = document.getElementById("refreshMenuBtn");
+const openConfigFolderBtn = document.getElementById("openConfigFolderBtn");
 const toggleDatasetFormBtn = document.getElementById("toggleDatasetFormBtn");
 const datasetFormPanel = document.getElementById("datasetFormPanel");
 const datasetNameInput = document.getElementById("datasetNameInput");
@@ -16,6 +30,8 @@ const seqSelect = document.getElementById("seqSelect");
 const annotationTypeSelect = document.getElementById("annotationTypeSelect");
 const annotationFileSelect = document.getElementById("annotationFileSelect");
 const annotationHint = document.getElementById("annotationHint");
+const layerControls = document.getElementById("layerControls");
+const layerWarnings = document.getElementById("layerWarnings");
 const frameSlider = document.getElementById("frameSlider");
 const frameHint = document.getElementById("frameHint");
 
@@ -39,6 +55,7 @@ const prevBtn = document.getElementById("prevBtn");
 const nextBtn = document.getElementById("nextBtn");
 const playBtn = document.getElementById("playBtn");
 const stopBtn = document.getElementById("stopBtn");
+const playbackModeSelect = document.getElementById("playbackModeSelect");
 const playbackSpeed = document.getElementById("playbackSpeed");
 const speedHint = document.getElementById("speedHint");
 const viewerInfo = document.getElementById("viewerInfo");
@@ -50,8 +67,40 @@ const lockedBoxInfo = document.getElementById("lockedBoxInfo");
 const zoomInput = document.getElementById("zoomInput");
 const zoomResetBtn = document.getElementById("zoomResetBtn");
 const zoomHint = document.getElementById("zoomHint");
+const zoomReadout = document.getElementById("zoomReadout");
+const zoomResetFloatingBtn = document.getElementById("zoomResetFloatingBtn");
+const zoomActualBtn = document.getElementById("zoomActualBtn");
 const minimapCanvas = document.getElementById("minimapCanvas");
 const minimapRect = document.getElementById("minimapRect");
+const videoStage = document.getElementById("videoStage");
+const sequenceVideo = document.getElementById("sequenceVideo");
+const videoOverlayCanvas = document.getElementById("videoOverlayCanvas");
+const videoOverlayCtx = videoOverlayCanvas.getContext("2d");
+const exportTarget = document.getElementById("exportTarget");
+const exportFormat = document.getElementById("exportFormat");
+const exportLayerList = document.getElementById("exportLayerList");
+const exportBtn = document.getElementById("exportBtn");
+const exportStatus = document.getElementById("exportStatus");
+const openExportBtn = document.getElementById("openExportBtn");
+const openExportMenuBtn = document.getElementById("openExportMenuBtn");
+const exportModal = document.getElementById("exportModal");
+const exportCancelBtn = document.getElementById("exportCancelBtn");
+const progressModal = document.getElementById("progressModal");
+const progressTitle = document.getElementById("progressTitle");
+const progressFill = document.getElementById("progressFill");
+const progressPercent = document.getElementById("progressPercent");
+const progressMessage = document.getElementById("progressMessage");
+const progressCloseBtn = document.getElementById("progressCloseBtn");
+const colorPickerModal = document.getElementById("colorPickerModal");
+const colorPickerTitle = document.getElementById("colorPickerTitle");
+const colorPickerCloseBtn = document.getElementById("colorPickerCloseBtn");
+const colorPickerInput = document.getElementById("colorPickerInput");
+const colorHexInput = document.getElementById("colorHexInput");
+const colorPickerPreview = document.getElementById("colorPickerPreview");
+const colorPickerError = document.getElementById("colorPickerError");
+const colorResetBtn = document.getElementById("colorResetBtn");
+const colorCancelBtn = document.getElementById("colorCancelBtn");
+const colorApplyBtn = document.getElementById("colorApplyBtn");
 
 // Canvas
 const canvas = document.getElementById("frameCanvas");
@@ -62,12 +111,18 @@ let lastFrameInfo = null;
 let currentImage = null;
 let currentBoxes = [];
 let currentMotFrame = null;
+let annotationPayload = null;
+let layerState = {};
+let videoInfo = null;
+let videoAnimationId = null;
 let hoveredIndex = -1;
 let lockedBoxIndex = -1;
+let colorPickerState = null;
 
 // Playback state
 let isPlaying = false;
 let playbackIntervalId = null;
+let activeProgressJob = null;
 
 // Zoom and pan state
 let zoomLevel = 1.0; // 1.0 = 100%
@@ -84,6 +139,12 @@ let rectSelectStartY = 0;
 let isRectSelecting = false;
 
 const EPS_VIS = 1e-6;
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+const CANVAS_BACKGROUND_KEY = "motScopeCanvasBackground";
+const CANVAS_BACKGROUND_MODES = new Set(["white-grid", "black-grid", "plain-white", "plain-black"]);
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 8.0;
+const ZOOM_STEP = 1.15;
 
 // text size
 const ID_FONT_PX = 18;
@@ -126,6 +187,90 @@ function getRadio(name, fallback) {
   return el ? el.value : fallback;
 }
 
+function setRadio(name, value) {
+  const el = document.querySelector(`input[name="${name}"][value="${value}"]`);
+  if (el) el.checked = true;
+}
+
+function closeMenus() {
+  for (const [button, menu] of [[fileMenuBtn, fileMenuDropdown], [viewMenuBtn, viewMenuDropdown]]) {
+    if (!button || !menu) continue;
+    menu.hidden = true;
+    button.classList.remove("active");
+    button.setAttribute("aria-expanded", "false");
+  }
+  if (canvasBgMenu) canvasBgMenu.hidden = true;
+  if (canvasBgMenuBtn) canvasBgMenuBtn.classList.remove("active");
+}
+
+function toggleMenu(button, menu) {
+  if (!button || !menu) return;
+  const shouldOpen = menu.hidden;
+  closeMenus();
+  menu.hidden = !shouldOpen;
+  button.classList.toggle("active", shouldOpen);
+  button.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+}
+
+function applyTheme(theme) {
+  const nextTheme = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = nextTheme;
+  localStorage.setItem("motscope-theme", nextTheme);
+  if (themeToggleBtn) {
+    themeToggleBtn.textContent = nextTheme === "dark" ? "Light" : "Dark";
+    themeToggleBtn.title = nextTheme === "dark" ? "Switch to light theme" : "Switch to dark theme";
+  }
+}
+
+function initTheme() {
+  applyTheme(localStorage.getItem("motscope-theme") || "light");
+}
+
+function applyCanvasBackground(value) {
+  const next = CANVAS_BACKGROUND_MODES.has(value) ? value : "white-grid";
+  viewerWorkspace.dataset.canvasBg = next;
+  if (canvasBackgroundSelect) canvasBackgroundSelect.value = next;
+  localStorage.setItem("motScopeCanvasBackground", next);
+  for (const button of document.querySelectorAll(".canvasBgOption")) {
+    button.classList.toggle("active", button.dataset.canvasBg === next);
+  }
+}
+
+function initCanvasBackground() {
+  applyCanvasBackground(localStorage.getItem(CANVAS_BACKGROUND_KEY) || "white-grid");
+}
+
+function updateZoomText() {
+  const label = `${Math.round(zoomLevel * 100)}%`;
+  zoomInput.value = Math.round(zoomLevel * 100);
+  zoomHint.textContent = label;
+  if (zoomReadout) zoomReadout.textContent = label;
+}
+
+function activeDisplayScale() {
+  if (playbackModeSelect.value === "smooth" && videoStage && sequenceVideo.videoWidth) {
+    const rect = videoStage.getBoundingClientRect();
+    const unscaledWidth = zoomLevel > 0 ? rect.width / zoomLevel : rect.width;
+    return unscaledWidth > 0 ? sequenceVideo.videoWidth / unscaledWidth : 1;
+  }
+  if (!canvas.width) return 1;
+  const rect = canvas.getBoundingClientRect();
+  return rect.width > 0 ? canvas.width / rect.width : 1;
+}
+
+function applyVideoViewport() {
+  if (!videoStage) return;
+  videoStage.style.transform = `scale(${zoomLevel})`;
+}
+
+function isValidHexColor(value) {
+  return HEX_COLOR_RE.test(String(value || "").trim());
+}
+
+function normalizedHex(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
 function throttle(fn, waitMs) {
   let last = 0;
   let timer = null;
@@ -166,6 +311,146 @@ function visIsNot1(vis) {
   return typeof vis === "number" && vis >= 0 && Math.abs(vis - 1.0) > EPS_VIS;
 }
 
+function layerKey(name) {
+  return String(name || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function getLayerSettings(name) {
+  const payloadLayer = annotationPayload && annotationPayload.layers
+    ? annotationPayload.layers.find(layer => layer.name === name)
+    : null;
+  return Object.assign({}, payloadLayer || {}, layerState[name] || {});
+}
+
+function visibleLayerNames() {
+  if (!annotationPayload || !annotationPayload.layers) return [];
+  return annotationPayload.layers
+    .map(layer => getLayerSettings(layer.name))
+    .filter(layer => layer.visible !== false)
+    .map(layer => layer.name);
+}
+
+function flattenBoxesForFrame(motFrame) {
+  if (!annotationPayload || motFrame === null || motFrame === undefined) return [];
+  const frameLayers = (annotationPayload.frames || {})[String(motFrame)] || {};
+  const out = [];
+  for (const name of visibleLayerNames()) {
+    const settings = getLayerSettings(name);
+    const threshold = parseFloat(settings.score_threshold || 0) || 0;
+    for (const box of (frameLayers[name] || [])) {
+      const score = typeof box.score === "number" ? box.score : parseFloat(box.score || "1");
+      if (score < threshold) continue;
+      out.push({
+        id: box.id,
+        x1: box.x1 ?? box.x,
+        y1: box.y1 ?? box.y,
+        x2: box.x2 ?? (box.x + box.w),
+        y2: box.y2 ?? (box.y + box.h),
+        w: box.w,
+        h: box.h,
+        score,
+        vis: box.vis,
+        layer: name,
+        color: settings.color || "#35e6fd",
+        draw_id: settings.draw_id !== false,
+        draw_score: settings.draw_score === true,
+      });
+    }
+  }
+  return out;
+}
+
+function refreshCurrentBoxes() {
+  if (currentMotFrame !== null && currentMotFrame !== undefined && annotationPayload) {
+    currentBoxes = flattenBoxesForFrame(currentMotFrame);
+    updateLockedBoxInfo();
+    updateNavUI();
+  }
+}
+
+function updateLayerState(name, patch) {
+  layerState[name] = Object.assign({}, getLayerSettings(name), patch);
+  refreshCurrentBoxes();
+  populateExportLayers();
+  redrawActiveViewer();
+}
+
+function layerDefaultColor(name) {
+  const payloadLayer = annotationPayload && annotationPayload.layers
+    ? annotationPayload.layers.find(layer => layer.name === name)
+    : null;
+  return (payloadLayer && payloadLayer.color) || "#3b82f6";
+}
+
+function layerTypeLabel(layer) {
+  const type = String(layer.type || "").trim().toUpperCase();
+  if (type) return type;
+  const name = String(layer.name || "").toLowerCase();
+  if (name.includes("det")) return "DET";
+  if (name.includes("track")) return "TRACK";
+  return "GT";
+}
+
+function updateColorPickerPreview(value) {
+  colorPickerInput.value = value;
+  colorHexInput.value = value;
+  colorPickerPreview.style.background = value;
+}
+
+function applyPreviewColor(value) {
+  if (!colorPickerState) return false;
+  const color = normalizedHex(value);
+  if (!isValidHexColor(color)) {
+    colorPickerError.textContent = "Enter a valid 6-digit hex color, for example #3b82f6.";
+    return false;
+  }
+  colorPickerError.textContent = "";
+  updateColorPickerPreview(color);
+  updateLayerState(colorPickerState.layerName, { color });
+  for (const swatch of document.querySelectorAll("[data-layer-color]")) {
+    if (swatch.getAttribute("data-layer-color") === colorPickerState.layerName) {
+      swatch.style.background = color;
+    }
+  }
+  return true;
+}
+
+function openLayerColorPicker(layerName) {
+  const settings = getLayerSettings(layerName);
+  const originalColor = normalizedHex(settings.color || layerDefaultColor(layerName));
+  colorPickerState = {
+    layerName,
+    originalColor,
+    defaultColor: normalizedHex(layerDefaultColor(layerName)),
+  };
+  colorPickerTitle.textContent = `Layer Color: ${layerName}`;
+  colorPickerError.textContent = "";
+  updateColorPickerPreview(originalColor);
+  colorPickerModal.style.display = "flex";
+  colorHexInput.focus();
+}
+
+function closeLayerColorPicker(commit) {
+  if (!colorPickerState) {
+    colorPickerModal.style.display = "none";
+    return;
+  }
+  if (!commit) {
+    updateLayerState(colorPickerState.layerName, { color: colorPickerState.originalColor });
+  }
+  colorPickerState = null;
+  colorPickerModal.style.display = "none";
+  renderLayerControls();
+}
+
+function redrawActiveViewer() {
+  if (playbackModeSelect.value === "smooth") {
+    drawVideoOverlay();
+  } else {
+    drawScene();
+  }
+}
+
 function getParams() {
   const dataset = datasetSelect.value;
   const split = splitSelect.value;
@@ -198,8 +483,10 @@ function updateNavUI() {
   const dataset = datasetSelect.value;
   const split = splitSelect.value;
   const seq = seqSelect.value || "(no seq)";
-  const annotationLabel = `${annotationTypeSelect.value}:${annotationFileSelect.value || "-"}`;
-  viewerInfo.textContent = `${dataset}/${split}/${seq} | ${annotationLabel} | frame_idx: ${idx} / ${maxV} | mot: ${currentMotFrame ?? "-"}`;
+  const layerLabel = annotationPayload && annotationPayload.layers
+    ? `${visibleLayerNames().length}/${annotationPayload.layers.length} layers`
+    : `${annotationTypeSelect.value}:${annotationFileSelect.value || "-"}`;
+  viewerInfo.textContent = `${dataset}/${split}/${seq} | ${layerLabel} | frame_idx: ${idx} / ${maxV} | mot: ${currentMotFrame ?? "-"}`;
 }
 
 function updateFrameHint() {
@@ -213,8 +500,87 @@ function updateFrameHint() {
   updateNavUI();
 }
 
+function renderLayerControls() {
+  layerControls.innerHTML = "";
+  if (!annotationPayload || !annotationPayload.layers || annotationPayload.layers.length === 0) {
+    layerControls.innerHTML = `<div class="hint">No annotation layers configured or discovered.</div>`;
+    layerWarnings.textContent = "";
+    return;
+  }
+
+  for (const layer of annotationPayload.layers) {
+    const settings = getLayerSettings(layer.name);
+    const item = document.createElement("div");
+    item.className = "layerItem";
+    const key = layerKey(layer.name);
+    const layerType = layerTypeLabel(layer);
+    const threshold = parseFloat(settings.score_threshold || 0) || 0;
+    const isGT = String(layer.type || "").toLowerCase() === "gt";
+    item.innerHTML = `
+      <div class="layerHeader">
+        <span class="layerSwatch" data-layer-color="${layer.name}" style="background:${settings.color}"></span>
+        <span class="layerName" title="${layer.name}">${layer.name}</span>
+        <span class="layerBadge">${layerType}</span>
+        <button type="button" class="layerColorButton" id="layerColor_${key}" data-layer-color="${layer.name}" style="background:${settings.color || "#3b82f6"}" title="Change layer color"></button>
+      </div>
+      <div class="layerOptions">
+        <div class="layerSectionLabel">Layer visibility</div>
+        <label class="switchRow"><input type="checkbox" id="layerVisible_${key}" ${settings.visible !== false ? "checked" : ""} /> <span>Show this layer</span></label>
+        <div class="layerSectionLabel">Display options</div>
+        <label class="check"><input type="checkbox" id="layerDrawBBox_${key}" checked disabled /> Bounding box</label>
+        <label class="check"><input type="checkbox" id="layerDrawId_${key}" ${settings.draw_id !== false ? "checked" : ""} /> ID label</label>
+        <label class="check"><input type="checkbox" id="layerDrawScore_${key}" ${settings.draw_score === true ? "checked" : ""} /> Score label</label>
+        <div class="layerSectionLabel">Score threshold</div>
+        <div class="thresholdRow"><span>Min score</span><span id="layerThresholdText_${key}">${threshold.toFixed(2)}</span></div>
+        <input type="range" id="layerThreshold_${key}" min="0" max="1" step="0.01" value="${threshold}" ${isGT ? "disabled" : ""} />
+      </div>
+    `;
+    layerControls.appendChild(item);
+
+    document.getElementById(`layerColor_${key}`).addEventListener("click", () => {
+      openLayerColorPicker(layer.name);
+    });
+    document.getElementById(`layerVisible_${key}`).addEventListener("change", (e) => {
+      updateLayerState(layer.name, { visible: e.target.checked });
+    });
+    document.getElementById(`layerDrawId_${key}`).addEventListener("change", (e) => {
+      updateLayerState(layer.name, { draw_id: e.target.checked });
+    });
+    document.getElementById(`layerDrawScore_${key}`).addEventListener("change", (e) => {
+      updateLayerState(layer.name, { draw_score: e.target.checked });
+    });
+    document.getElementById(`layerThreshold_${key}`).addEventListener("input", (e) => {
+      const value = parseFloat(e.target.value) || 0;
+      document.getElementById(`layerThresholdText_${key}`).textContent = value.toFixed(2);
+      updateLayerState(layer.name, { score_threshold: value });
+    });
+  }
+
+  const warnings = annotationPayload.warnings || [];
+  layerWarnings.textContent = warnings.length
+    ? `${warnings.length} annotation warning(s). First: ${warnings[0]}`
+    : "";
+}
+
+function populateExportLayers() {
+  exportLayerList.innerHTML = "";
+  if (!annotationPayload || !annotationPayload.layers) return;
+  for (const layer of annotationPayload.layers) {
+    const settings = getLayerSettings(layer.name);
+    const key = layerKey(`export_${layer.name}`);
+    const label = document.createElement("label");
+    label.className = "check";
+    label.innerHTML = `<input type="checkbox" id="${key}" value="${layer.name}" ${settings.visible !== false ? "checked" : ""} /> ${layer.name}`;
+    exportLayerList.appendChild(label);
+  }
+}
+
 // ---- playback control ----
 function startPlayback() {
+  if (playbackModeSelect.value === "smooth") {
+    startSmoothPlayback();
+    return;
+  }
   const maxV = parseInt(frameSlider.max || "0", 10);
   if (maxV <= 0) return;
 
@@ -246,6 +612,13 @@ function stopPlayback() {
     clearInterval(playbackIntervalId);
     playbackIntervalId = null;
   }
+  if (sequenceVideo) {
+    sequenceVideo.pause();
+  }
+  if (videoAnimationId !== null) {
+    cancelAnimationFrame(videoAnimationId);
+    videoAnimationId = null;
+  }
   playBtn.disabled = false;
   stopBtn.disabled = true;
 }
@@ -256,8 +629,163 @@ function updatePlaybackSpeed() {
   
   // If playing, restart with new speed
   if (isPlaying) {
+    if (playbackModeSelect.value === "smooth") {
+      sequenceVideo.playbackRate = speed;
+    } else {
+      stopPlayback();
+      startPlayback();
+    }
+  }
+}
+
+function updatePlaybackModeUI() {
+  const smooth = playbackModeSelect.value === "smooth";
+  videoStage.style.display = smooth ? "block" : "none";
+  canvas.style.display = smooth ? "none" : "block";
+  if (typeof minimapOverlay !== "undefined" && minimapOverlay) {
+    minimapOverlay.style.display = smooth ? "none" : minimapOverlay.style.display;
+  }
+  if (smooth) {
+    applyVideoViewport();
+    loadSmoothVideo().catch((e) => setStatus(`Video error: ${e.message}`));
+  } else {
+    applyVideoViewport();
     stopPlayback();
-    startPlayback();
+    loadFrameImageAndBoxes();
+  }
+}
+
+async function loadSmoothVideo() {
+  const dataset = datasetSelect.value;
+  const split = splitSelect.value;
+  const seq = seqSelect.value;
+  if (!seq) throw new Error("No sequence selected");
+  if (!annotationPayload) await loadAnnotationPayload();
+  const payload = await runJobWithProgress(
+    "/api/video/render",
+    { dataset, split, sequence: seq },
+    "Generating Smooth Video"
+  );
+  videoInfo = payload;
+  if (!payload.available) {
+    throw new Error(payload.error || "video cache unavailable");
+  }
+  if (!sequenceVideo.src.endsWith(payload.video_url || "")) {
+    sequenceVideo.src = payload.video_url;
+  }
+  sequenceVideo.playbackRate = parseFloat(playbackSpeed.value) || 1;
+  setStatus("Smooth video ready");
+}
+
+async function startSmoothPlayback() {
+  try {
+    await loadSmoothVideo();
+    isPlaying = true;
+    playBtn.disabled = true;
+    stopBtn.disabled = false;
+    await sequenceVideo.play();
+    if (videoAnimationId === null) {
+      drawVideoOverlayLoop();
+    }
+  } catch (e) {
+    setStatus(`Video error: ${e.message}`);
+    stopPlayback();
+  }
+}
+
+function drawVideoOverlayLoop() {
+  drawVideoOverlay();
+  if (playbackModeSelect.value === "smooth" && !sequenceVideo.paused && !sequenceVideo.ended) {
+    videoAnimationId = requestAnimationFrame(drawVideoOverlayLoop);
+  } else {
+    videoAnimationId = null;
+  }
+}
+
+function drawVideoOverlay() {
+  if (!videoInfo || !annotationPayload || !sequenceVideo.videoWidth || !sequenceVideo.videoHeight) return;
+  if (videoOverlayCanvas.width !== sequenceVideo.videoWidth || videoOverlayCanvas.height !== sequenceVideo.videoHeight) {
+    videoOverlayCanvas.width = sequenceVideo.videoWidth;
+    videoOverlayCanvas.height = sequenceVideo.videoHeight;
+  }
+  videoOverlayCtx.clearRect(0, 0, videoOverlayCanvas.width, videoOverlayCanvas.height);
+  if (!showGT.checked || !showBBox.checked) return;
+  const fps = parseFloat(videoInfo.fps || annotationPayload.fps || 25);
+  const firstFrame = parseInt(videoInfo.first_frame || annotationPayload.first_frame || 1, 10);
+  const lastFrame = parseInt(
+    videoInfo.last_frame || (firstFrame + (videoInfo.frame_count || annotationPayload.frame_count || 1) - 1),
+    10
+  );
+  const frame = Math.min(
+    lastFrame,
+    Math.max(firstFrame, Math.floor(sequenceVideo.currentTime * fps) + firstFrame)
+  );
+  const boxes = flattenBoxesForFrame(frame);
+  for (const b of boxes) {
+    const rgb = hexToRgb(b.color || boxColor.value);
+    videoOverlayCtx.strokeStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
+    videoOverlayCtx.lineWidth = 2;
+    videoOverlayCtx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+    const labels = [];
+    if (showID.checked && b.draw_id !== false) labels.push(`id:${b.id}`);
+    if (b.draw_score === true) labels.push(`s:${b.score.toFixed(2)}`);
+    if (labels.length) {
+      videoOverlayCtx.font = `${ID_FONT_PX}px Arial`;
+      videoOverlayCtx.lineWidth = 4;
+      videoOverlayCtx.strokeStyle = "rgba(0,0,0,0.55)";
+      videoOverlayCtx.fillStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
+      const x = Math.max(0, b.x1);
+      const y = Math.max(ID_FONT_PX, b.y1 - 6);
+      videoOverlayCtx.strokeText(labels.join(" "), x, y);
+      videoOverlayCtx.fillText(labels.join(" "), x, y);
+    }
+  }
+}
+
+function showProgressModal(title, message = "Starting") {
+  progressTitle.textContent = title;
+  progressCloseBtn.disabled = true;
+  progressFill.style.width = "0%";
+  progressPercent.textContent = "0%";
+  progressMessage.textContent = message;
+  progressModal.style.display = "flex";
+}
+
+function updateProgressModal(payload) {
+  const progress = Math.max(0, Math.min(100, parseInt(payload.progress || 0, 10)));
+  progressFill.style.width = `${progress}%`;
+  progressPercent.textContent = `${progress}%`;
+  progressMessage.textContent = payload.message || payload.status || "Working";
+}
+
+function hideProgressModalSoon() {
+  progressCloseBtn.disabled = false;
+  setTimeout(() => {
+    if (!activeProgressJob) {
+      progressModal.style.display = "none";
+    }
+  }, 450);
+}
+
+async function runJobWithProgress(url, payload, title) {
+  showProgressModal(title);
+  const start = await postJSON(url, payload);
+  activeProgressJob = start.job_id;
+  while (true) {
+    const job = await fetchJSON(`/api/jobs/${encodeURIComponent(activeProgressJob)}`);
+    updateProgressModal(job);
+    if (job.status === "done") {
+      activeProgressJob = null;
+      hideProgressModalSoon();
+      return job.result || {};
+    }
+    if (job.status === "failed") {
+      activeProgressJob = null;
+      progressCloseBtn.disabled = false;
+      progressMessage.textContent = job.error || "Job failed";
+      throw new Error(job.error || "Job failed");
+    }
+    await new Promise(resolve => setTimeout(resolve, 250));
   }
 }
 
@@ -309,6 +837,12 @@ function clampPan() {
   const halfViewW = canvas.width / (2 * zoomLevel);
   const halfViewH = canvas.height / (2 * zoomLevel);
 
+  if (zoomLevel < 1.0) {
+    panX = Math.max(-halfViewW, Math.min(imgW + halfViewW, panX));
+    panY = Math.max(-halfViewH, Math.min(imgH + halfViewH, panY));
+    return;
+  }
+
   if (imgW <= 2 * halfViewW) {
     panX = imgW / 2;
   } else {
@@ -324,12 +858,12 @@ function clampPan() {
 
 function setZoomLevel(newZoom, anchorCanvasX = canvas.width / 2, anchorCanvasY = canvas.height / 2) {
   const oldZoom = zoomLevel;
-  const clampedZoom = Math.max(1.0, Math.min(4.0, newZoom));
+  const clampedZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
 
   if (!currentImage) {
     zoomLevel = clampedZoom;
-    zoomInput.value = Math.round(zoomLevel * 100);
-    zoomHint.textContent = `${Math.round(zoomLevel * 100)}%`;
+    updateZoomText();
+    applyVideoViewport();
     return;
   }
 
@@ -344,15 +878,15 @@ function setZoomLevel(newZoom, anchorCanvasX = canvas.width / 2, anchorCanvasY =
   panY = imageY - (anchorCanvasY - centerY) / zoomLevel;
   clampPan();
 
-  zoomInput.value = Math.round(zoomLevel * 100);
-  zoomHint.textContent = `${Math.round(zoomLevel * 100)}%`;
+  updateZoomText();
 }
 
 function applyZoom() {
   const val = parseInt(zoomInput.value || "100", 10);
-  const percent = Math.max(10, Math.min(400, val));
+  const percent = Math.max(MIN_ZOOM * 100, Math.min(MAX_ZOOM * 100, val));
   setZoomLevel(percent / 100);
-  drawScene();
+  applyVideoViewport();
+  redrawActiveViewer();
   updateMinimap();
   updateMinimapVisibility();
 }
@@ -362,11 +896,49 @@ function resetZoom() {
   const center = getImageCenter();
   panX = center.x;
   panY = center.y;
-  zoomInput.value = 100;
-  zoomHint.textContent = "100%";
-  drawScene();
+  updateZoomText();
+  applyVideoViewport();
+  redrawActiveViewer();
   updateMinimap();
   updateMinimapVisibility();
+}
+
+function zoomActualSize() {
+  setZoomLevel(activeDisplayScale());
+  applyVideoViewport();
+  redrawActiveViewer();
+  updateMinimap();
+  updateMinimapVisibility();
+}
+
+function canvasPointFromEvent(e) {
+  const rect = canvas.getBoundingClientRect();
+  const sx = canvas.width / rect.width;
+  const sy = canvas.height / rect.height;
+  return {
+    x: (e.clientX - rect.left) * sx,
+    y: (e.clientY - rect.top) * sy,
+  };
+}
+
+function zoomByFactor(factor, anchorX = canvas.width / 2, anchorY = canvas.height / 2) {
+  setZoomLevel(zoomLevel * factor, anchorX, anchorY);
+  applyVideoViewport();
+  redrawActiveViewer();
+  updateMinimap();
+  updateMinimapVisibility();
+}
+
+function handleViewerWheel(e) {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+  if (playbackModeSelect.value === "frame" && e.target === canvas) {
+    const point = canvasPointFromEvent(e);
+    zoomByFactor(factor, point.x, point.y);
+    return;
+  }
+  zoomByFactor(factor);
 }
 
 // ---- minimap ----
@@ -487,12 +1059,12 @@ function drawTextWithOutline(text, x, y, fillStyle, fontPx, alpha = 1.0) {
 
 function drawAllBoxes(dimAll = false, dimFactor = 1.0) {
   if (!showGT.checked) return;
-  const base = hexToRgb(boxColor.value);
   const visRgb = hexToRgb(visColor.value);
   const mode = getRadio("colorMode", "fixed");
 
   for (let i = 0; i < currentBoxes.length; i++) {
     const b = currentBoxes[i];
+    const base = hexToRgb(b.color || boxColor.value);
 
     const strength = computeStrength(b.vis, mode);
     let fillAlpha = strength.fillAlpha;
@@ -524,14 +1096,28 @@ function drawAllBoxes(dimAll = false, dimFactor = 1.0) {
 
     // labels always show
     const idText = `id:${b.id}`;
+    const scoreText = `s:${(typeof b.score === "number" ? b.score : 1.0).toFixed(2)}`;
     const visText = (typeof b.vis === "number" && b.vis >= 0) ? `v:${b.vis.toFixed(2)}` : "v:NA";
 
     // ID position: above box left
-    if (showID.checked) {
+    if (showID.checked && b.draw_id !== false) {
       const x = Math.max(0, b.x1);
       const y = Math.max(ID_FONT_PX, b.y1 - 6);
       drawTextWithOutline(
         idText,
+        x,
+        y,
+        `rgb(${rgb.r},${rgb.g},${rgb.b})`,
+        ID_FONT_PX,
+        dimAll ? dimFactor : 1.0
+      );
+    }
+
+    if (b.draw_score === true) {
+      const x = Math.max(0, b.x1);
+      const y = Math.max(ID_FONT_PX * 2, b.y1 + ID_FONT_PX);
+      drawTextWithOutline(
+        scoreText,
         x,
         y,
         `rgb(${rgb.r},${rgb.g},${rgb.b})`,
@@ -570,10 +1156,10 @@ function drawHoveredBoxOnTop() {
   if (!showGT.checked) return;
   if (hoveredIndex < 0 || hoveredIndex >= currentBoxes.length) return;
 
-  const base = hexToRgb(boxColor.value);
+  const b = currentBoxes[hoveredIndex];
+  const base = hexToRgb(b.color || boxColor.value);
   const visRgb = hexToRgb(visColor.value);
   const mode = getRadio("colorMode", "fixed");
-  const b = currentBoxes[hoveredIndex];
 
   const strength = computeStrength(b.vis, mode);
   const rgb = getBoxRgb(b, base);
@@ -597,12 +1183,19 @@ function drawHoveredBoxOnTop() {
 
   // texts (full alpha)
   const idText = `id:${b.id}`;
+  const scoreText = `s:${(typeof b.score === "number" ? b.score : 1.0).toFixed(2)}`;
   const visText = (typeof b.vis === "number" && b.vis >= 0) ? `v:${b.vis.toFixed(2)}` : "v:NA";
 
-  if (showID.checked) {
+  if (showID.checked && b.draw_id !== false) {
     const x = Math.max(0, b.x1);
     const y = Math.max(ID_FONT_PX, b.y1 - 6);
     drawTextWithOutline(idText, x, y, `rgb(${rgb.r},${rgb.g},${rgb.b})`, ID_FONT_PX, 1.0);
+  }
+
+  if (b.draw_score === true) {
+    const x = Math.max(0, b.x1);
+    const y = Math.max(ID_FONT_PX * 2, b.y1 + ID_FONT_PX);
+    drawTextWithOutline(scoreText, x, y, `rgb(${rgb.r},${rgb.g},${rgb.b})`, ID_FONT_PX, 1.0);
   }
 
   if (showVis.checked) {
@@ -629,17 +1222,17 @@ function drawHoveredBoxOnTop() {
   // hover info bar
   const bbStr = `bbox=(${b.x1.toFixed(0)},${b.y1.toFixed(0)},${(b.x2-b.x1).toFixed(0)},${(b.y2-b.y1).toFixed(0)})`;
   const vStr = (typeof b.vis === "number" && b.vis >= 0) ? `vis=${b.vis.toFixed(2)}` : "vis=NA";
-  hoverInfo.textContent = `Hover: id=${b.id} | ${vStr} | ${bbStr}`;
+  hoverInfo.textContent = `Hover: ${b.layer || "layer"} id=${b.id} | ${vStr} | ${bbStr}`;
 }
 
 function drawLockedBoxOnTop() {
   if (!showGT.checked) return;
   if (lockedBoxIndex < 0 || lockedBoxIndex >= currentBoxes.length) return;
 
-  const base = hexToRgb(boxColor.value);
+  const b = currentBoxes[lockedBoxIndex];
+  const base = hexToRgb(b.color || boxColor.value);
   const visRgb = hexToRgb(visColor.value);
   const mode = getRadio("colorMode", "fixed");
-  const b = currentBoxes[lockedBoxIndex];
 
   const strength = computeStrength(b.vis, mode);
   const rgb = getBoxRgb(b, base);
@@ -663,12 +1256,19 @@ function drawLockedBoxOnTop() {
 
   // texts (full alpha)
   const idText = `id:${b.id}`;
+  const scoreText = `s:${(typeof b.score === "number" ? b.score : 1.0).toFixed(2)}`;
   const visText = (typeof b.vis === "number" && b.vis >= 0) ? `v:${b.vis.toFixed(2)}` : "v:NA";
 
-  if (showID.checked) {
+  if (showID.checked && b.draw_id !== false) {
     const x = Math.max(0, b.x1);
     const y = Math.max(ID_FONT_PX, b.y1 - 6);
     drawTextWithOutline(idText, x, y, `rgb(${rgb.r},${rgb.g},${rgb.b})`, ID_FONT_PX, 1.0);
+  }
+
+  if (b.draw_score === true) {
+    const x = Math.max(0, b.x1);
+    const y = Math.max(ID_FONT_PX * 2, b.y1 + ID_FONT_PX);
+    drawTextWithOutline(scoreText, x, y, `rgb(${rgb.r},${rgb.g},${rgb.b})`, ID_FONT_PX, 1.0);
   }
 
   if (showVis.checked) {
@@ -695,7 +1295,7 @@ function drawLockedBoxOnTop() {
   // locked info bar
   const bbStr = `bbox=(${b.x1.toFixed(0)},${b.y1.toFixed(0)},${(b.x2-b.x1).toFixed(0)},${(b.y2-b.y1).toFixed(0)})`;
   const vStr = (typeof b.vis === "number" && b.vis >= 0) ? `vis=${b.vis.toFixed(2)}` : "vis=NA";
-  hoverInfo.textContent = `Locked: id=${b.id} | ${vStr} | ${bbStr}`;
+  hoverInfo.textContent = `Locked: ${b.layer || "layer"} id=${b.id} | ${vStr} | ${bbStr}`;
 }
 
 function drawScene() {
@@ -820,9 +1420,9 @@ let clickStartY = 0;
 canvas.addEventListener("mousedown", (e) => {
   clickStartX = e.clientX;
   clickStartY = e.clientY;
+  if (e.button !== 0) return;
   // Handle different modes
-  if (zoomMode === "pan") {
-    if (zoomLevel <= 1) return; // Only pan when zoomed
+  if (e.shiftKey || e.code === "Space" || zoomMode === "pan") {
     isDragging = true;
     dragStartX = e.clientX;
     dragStartY = e.clientY;
@@ -832,7 +1432,7 @@ canvas.addEventListener("mousedown", (e) => {
     const sy = canvas.height / rect.height;
     const canvasX = (e.clientX - rect.left) * sx;
     const canvasY = (e.clientY - rect.top) * sy;
-    setZoomLevel(zoomLevel * 1.1, canvasX, canvasY);
+    setZoomLevel(zoomLevel * ZOOM_STEP, canvasX, canvasY);
     drawScene();
     updateMinimap();
     updateMinimapVisibility();
@@ -842,7 +1442,7 @@ canvas.addEventListener("mousedown", (e) => {
     const sy = canvas.height / rect.height;
     const canvasX = (e.clientX - rect.left) * sx;
     const canvasY = (e.clientY - rect.top) * sy;
-    setZoomLevel(zoomLevel / 1.1, canvasX, canvasY);
+    setZoomLevel(zoomLevel / ZOOM_STEP, canvasX, canvasY);
     drawScene();
     updateMinimap();
     updateMinimapVisibility();
@@ -948,7 +1548,7 @@ canvas.addEventListener("mouseup", (e) => {
     if (pw > 10 && ph > 10) {
       const desiredZoomX = canvas.width / pw;
       const desiredZoomY = canvas.height / ph;
-      const newZoom = Math.min(4.0, Math.max(1.0, Math.min(desiredZoomX, desiredZoomY)));
+      const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(desiredZoomX, desiredZoomY)));
       const centerPx_x = (px_min + px_max) / 2;
       const centerPx_y = (py_min + py_max) / 2;
 
@@ -956,8 +1556,7 @@ canvas.addEventListener("mouseup", (e) => {
       panX = centerPx_x;
       panY = centerPx_y;
       clampPan();
-      zoomInput.value = Math.round(zoomLevel * 100);
-      zoomHint.textContent = Math.round(zoomLevel * 100) + "%";
+      updateZoomText();
       drawScene();
       updateMinimap();
       updateMinimapVisibility();
@@ -970,6 +1569,8 @@ canvas.addEventListener("mouseup", (e) => {
 canvas.addEventListener("mouseleave", () => {
   isDragging = false;
 });
+
+viewerStage.addEventListener("wheel", handleViewerWheel, { passive: false });
 
 // ---- load image + boxes ----
 let renderAbort = null;
@@ -1003,11 +1604,17 @@ async function loadFrameImageAndBoxes() {
 
       currentImage = img;
       currentMotFrame = boxJson.mot_frame ?? null;
-      currentBoxes = (boxJson.boxes || []).map(b => ({
-        id: b.id,
-        x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2,
-        vis: b.vis
-      }));
+      currentBoxes = annotationPayload
+        ? flattenBoxesForFrame(currentMotFrame)
+        : (boxJson.boxes || []).map(b => ({
+          id: b.id,
+          x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2,
+          vis: b.vis,
+          score: 1.0,
+          color: boxColor.value,
+          draw_id: true,
+          draw_score: false,
+        }));
 
       hoveredIndex = -1;
       lockedBoxIndex = -1;
@@ -1116,6 +1723,29 @@ async function loadAnnotationFiles() {
     : `No ${nextType.toUpperCase()} files found in this sequence.`;
 }
 
+async function loadAnnotationPayload() {
+  const dataset = datasetSelect.value;
+  const split = splitSelect.value;
+  const seq = seqSelect.value;
+  annotationPayload = null;
+  layerState = {};
+  layerControls.innerHTML = "";
+  layerWarnings.textContent = "";
+  populateExportLayers();
+  if (!seq) return null;
+
+  const payload = await fetchJSON(
+    `/api/annotations?dataset=${encodeURIComponent(dataset)}&split=${encodeURIComponent(split)}&seq=${encodeURIComponent(seq)}`
+  );
+  annotationPayload = payload;
+  for (const layer of (payload.layers || [])) {
+    layerState[layer.name] = Object.assign({}, layer);
+  }
+  renderLayerControls();
+  populateExportLayers();
+  return payload;
+}
+
 function refreshAnnotationFileOptions() {
   const dataset = datasetSelect.value;
   const split = splitSelect.value;
@@ -1172,8 +1802,7 @@ function clearDatasetForm() {
 }
 
 function setDatasetFormOpen(isOpen) {
-  datasetFormPanel.style.display = isOpen ? "block" : "none";
-  toggleDatasetFormBtn.textContent = isOpen ? "Hide Dataset Form" : "Add Dataset";
+  datasetFormPanel.style.display = isOpen ? "flex" : "none";
   if (isOpen) {
     datasetNameInput.focus();
   }
@@ -1263,18 +1892,126 @@ async function loadFrameInfo() {
   return info;
 }
 
+function updateExportFormatOptions() {
+  const target = exportTarget.value;
+  const formats = target === "video" ? ["mp4"] : ["jpg", "jpeg", "png", "svg"];
+  const previous = exportFormat.value;
+  exportFormat.innerHTML = "";
+  for (const fmt of formats) {
+    const opt = document.createElement("option");
+    opt.value = fmt;
+    opt.textContent = fmt.toUpperCase();
+    exportFormat.appendChild(opt);
+  }
+  exportFormat.value = formats.includes(previous) ? previous : formats[0];
+}
+
+function selectedExportLayers(mode) {
+  if (mode === "none") return [];
+  if (mode === "visible") return visibleLayerNames();
+  const selected = [];
+  for (const input of exportLayerList.querySelectorAll("input[type='checkbox']")) {
+    if (input.checked) selected.push(input.value);
+  }
+  return selected;
+}
+
+function exportLayerOverrides() {
+  const out = {};
+  if (!annotationPayload || !annotationPayload.layers) return out;
+  for (const layer of annotationPayload.layers) {
+    const settings = getLayerSettings(layer.name);
+    out[layer.name] = {
+      color: settings.color,
+      visible: settings.visible !== false,
+      draw_id: settings.draw_id !== false,
+      draw_score: settings.draw_score === true,
+      score_threshold: parseFloat(settings.score_threshold || 0) || 0,
+    };
+  }
+  return out;
+}
+
+function currentExportFrame() {
+  if (currentMotFrame !== null && currentMotFrame !== undefined) return currentMotFrame;
+  const idx = parseInt(frameSlider.value || "0", 10);
+  const first = lastFrameInfo && lastFrameInfo.min_frame ? parseInt(lastFrameInfo.min_frame, 10) : 1;
+  return first + idx;
+}
+
+function triggerDownload(downloadUrl, filename = null) {
+  const link = document.createElement("a");
+  link.href = downloadUrl;
+  if (filename) link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+async function runExport() {
+  const target = exportTarget.value;
+  const mode = getRadio("exportAnnotationMode", "visible");
+  const payload = {
+    dataset: datasetSelect.value,
+    split: splitSelect.value,
+    sequence: seqSelect.value,
+    frame: currentExportFrame(),
+    include_annotations: mode !== "none",
+    annotation_mode: mode,
+    selected_layers: selectedExportLayers(mode),
+    layer_overrides: exportLayerOverrides(),
+    format: exportFormat.value,
+    fps: annotationPayload ? annotationPayload.fps : 25,
+  };
+  try {
+    exportBtn.disabled = true;
+    exportStatus.textContent = "Exporting...";
+    const result = await runJobWithProgress(
+      "/api/export/start",
+      Object.assign({ target }, payload),
+      target === "video" ? "Exporting Annotated Video" : "Exporting"
+    );
+    if (!result.available) throw new Error(result.error || "Export unavailable");
+    const downloadUrl = result.download_url;
+    const filename = downloadUrl ? downloadUrl.split("/").pop() : null;
+    if (!downloadUrl) throw new Error("Export completed without a download URL");
+    triggerDownload(downloadUrl, filename);
+    exportStatus.innerHTML = `Export complete. Download started. <a class="exportLink" href="${downloadUrl}">Download again</a>`;
+  } catch (e) {
+    exportStatus.textContent = `Export failed: ${e.message}`;
+  } finally {
+    exportBtn.disabled = false;
+  }
+}
+
+function setExportModalOpen(isOpen) {
+  exportModal.style.display = isOpen ? "flex" : "none";
+  if (isOpen) {
+    updateExportFormatOptions();
+    populateExportLayers();
+    exportStatus.textContent = "Choose an export target and format.";
+  }
+}
+
 async function refreshAll() {
   try {
     setStatus("Loading...");
+    videoInfo = null;
+    sequenceVideo.removeAttribute("src");
     await loadSplits();
     await loadSequences();
     await loadAnnotationFiles();
+    await loadAnnotationPayload();
     const info = await loadFrameInfo();
     await loadVisNot1Frames();
     await loadMeta();
     setStatus(`Loaded. frames=${info.count || 0}`);
     frameInput.value = "";
-    loadFrameImageAndBoxes();
+    if (playbackModeSelect.value === "smooth") {
+      updatePlaybackModeUI();
+    } else {
+      loadFrameImageAndBoxes();
+    }
   } catch (e) {
     setStatus(`Error: ${e.message}`);
   }
@@ -1290,10 +2027,71 @@ function stepFrame(delta) {
   frameSlider.value = next;
   frameInput.value = "";
   updateFrameHint();
+  if (playbackModeSelect.value === "smooth" && videoInfo) {
+    const fps = parseFloat(videoInfo.fps || 25);
+    sequenceVideo.currentTime = next / fps;
+    drawVideoOverlay();
+    return;
+  }
   loadFrameImageAndBoxes();
 }
 
 // ---- events ----
+fileMenuBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleMenu(fileMenuBtn, fileMenuDropdown);
+});
+
+viewMenuBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleMenu(viewMenuBtn, viewMenuDropdown);
+});
+
+document.addEventListener("click", closeMenus);
+
+fileMenuDropdown.addEventListener("click", (e) => {
+  e.stopPropagation();
+  closeMenus();
+});
+
+viewMenuDropdown.addEventListener("click", (e) => {
+  e.stopPropagation();
+});
+
+themeLightBtn.addEventListener("click", () => applyTheme("light"));
+themeDarkBtn.addEventListener("click", () => applyTheme("dark"));
+themeToggleBtn.addEventListener("click", () => {
+  const current = document.documentElement.dataset.theme || "light";
+  applyTheme(current === "dark" ? "light" : "dark");
+});
+
+refreshMenuBtn.addEventListener("click", refreshAll);
+openConfigFolderBtn.addEventListener("click", () => {
+  setStatus("Config folder: instance/datasets.json");
+});
+
+canvasBackgroundSelect.addEventListener("change", (e) => {
+  applyCanvasBackground(e.target.value);
+});
+
+canvasBgMenuBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  canvasBgMenu.hidden = !canvasBgMenu.hidden;
+  canvasBgMenuBtn.classList.toggle("active", !canvasBgMenu.hidden);
+});
+
+canvasBgMenu.addEventListener("click", (e) => {
+  e.stopPropagation();
+});
+
+document.querySelectorAll(".canvasBgOption").forEach((button) => {
+  button.addEventListener("click", () => {
+    applyCanvasBackground(button.dataset.canvasBg);
+    canvasBgMenu.hidden = true;
+    canvasBgMenuBtn.classList.remove("active");
+  });
+});
+
 datasetSelect.addEventListener("change", () => {
   stopPlayback();
   refreshAll();
@@ -1314,6 +2112,12 @@ datasetCancelBtn.addEventListener("click", () => {
   setDatasetFormOpen(false);
 });
 
+datasetFormPanel.addEventListener("click", (e) => {
+  if (e.target === datasetFormPanel) {
+    setDatasetFormOpen(false);
+  }
+});
+
 [datasetNameInput, datasetRootInput, datasetSplitsInput, datasetImageDirInput, datasetGtFilesInput, datasetSeqinfoInput, datasetGameinfoInput].forEach((el) => {
   el.addEventListener("keydown", (e) => {
     if (e.key === "Enter") saveDataset();
@@ -1325,14 +2129,18 @@ splitSelect.addEventListener("change", () => {
   (async () => {
     try {
       setStatus("Loading...");
+      videoInfo = null;
+      sequenceVideo.removeAttribute("src");
       await loadSequences();
       await loadAnnotationFiles();
+      await loadAnnotationPayload();
       const info = await loadFrameInfo();
       await loadVisNot1Frames();
       await loadMeta();
       setStatus(`Loaded. frames=${info.count || 0}`);
       frameInput.value = "";
-      loadFrameImageAndBoxes();
+      if (playbackModeSelect.value === "smooth") updatePlaybackModeUI();
+      else loadFrameImageAndBoxes();
     } catch (e) {
       setStatus(`Error: ${e.message}`);
     }
@@ -1343,13 +2151,17 @@ seqSelect.addEventListener("change", async () => {
   try {
     stopPlayback();
     setStatus("Loading frames...");
+    videoInfo = null;
+    sequenceVideo.removeAttribute("src");
     await loadAnnotationFiles();
+    await loadAnnotationPayload();
     const info = await loadFrameInfo();
     await loadVisNot1Frames();
     await loadMeta();
     setStatus(`Loaded. frames=${info.count || 0}`);
     frameInput.value = "";
-    loadFrameImageAndBoxes();
+    if (playbackModeSelect.value === "smooth") updatePlaybackModeUI();
+    else loadFrameImageAndBoxes();
   } catch (e) {
     setStatus(`Error: ${e.message}`);
   }
@@ -1358,6 +2170,7 @@ seqSelect.addEventListener("change", async () => {
 annotationTypeSelect.addEventListener("change", async () => {
   try {
     await loadAnnotationFiles();
+    await loadAnnotationPayload();
     await loadVisNot1Frames();
     loadFrameImageAndBoxes();
   } catch (e) {
@@ -1377,18 +2190,25 @@ annotationFileSelect.addEventListener("change", async () => {
 // slider realtime
 frameSlider.addEventListener("input", () => {
   updateFrameHint();
+  if (playbackModeSelect.value === "smooth" && videoInfo) {
+    const idx = parseInt(frameSlider.value || "0", 10);
+    const fps = parseFloat(videoInfo.fps || 25);
+    sequenceVideo.currentTime = idx / fps;
+    drawVideoOverlay();
+    return;
+  }
   renderThrottled();
 });
 
 // toggles redraw (no refetch)
 [showGT, showBBox, showID, showVis, highlightVis].forEach(el => {
-  el.addEventListener("change", () => drawScene());
+  el.addEventListener("change", () => redrawActiveViewer());
 });
 
-boxColor.addEventListener("change", () => drawScene());
-visColor.addEventListener("change", () => drawScene());
+boxColor.addEventListener("change", () => redrawActiveViewer());
+visColor.addEventListener("change", () => redrawActiveViewer());
 document.querySelectorAll('input[name="colorMode"]').forEach(el => {
-  el.addEventListener("change", () => drawScene());
+  el.addEventListener("change", () => redrawActiveViewer());
 });
 
 goBtn.addEventListener("click", () => {
@@ -1417,9 +2237,86 @@ nextBtn.addEventListener("click", () => stepFrame(1));
 playBtn.addEventListener("click", startPlayback);
 stopBtn.addEventListener("click", stopPlayback);
 playbackSpeed.addEventListener("input", updatePlaybackSpeed);
+playbackSpeed.addEventListener("change", updatePlaybackSpeed);
+playbackModeSelect.addEventListener("change", updatePlaybackModeUI);
+sequenceVideo.addEventListener("loadedmetadata", () => {
+  applyVideoViewport();
+  drawVideoOverlay();
+});
+sequenceVideo.addEventListener("timeupdate", () => {
+  drawVideoOverlay();
+});
+sequenceVideo.addEventListener("play", () => {
+  if (playbackModeSelect.value === "smooth" && videoAnimationId === null) {
+    drawVideoOverlayLoop();
+  }
+});
+sequenceVideo.addEventListener("pause", () => {
+  isPlaying = false;
+  playBtn.disabled = false;
+  stopBtn.disabled = true;
+});
+sequenceVideo.addEventListener("ended", () => {
+  isPlaying = false;
+  playBtn.disabled = false;
+  stopBtn.disabled = true;
+  drawVideoOverlay();
+});
+exportTarget.addEventListener("change", updateExportFormatOptions);
+exportBtn.addEventListener("click", runExport);
+openExportBtn.addEventListener("click", () => setExportModalOpen(true));
+if (openExportMenuBtn) {
+  openExportMenuBtn.addEventListener("click", () => setExportModalOpen(true));
+}
+exportCancelBtn.addEventListener("click", () => setExportModalOpen(false));
+progressCloseBtn.addEventListener("click", () => {
+  if (!activeProgressJob) {
+    progressModal.style.display = "none";
+  }
+});
+
+colorPickerInput.addEventListener("input", (e) => {
+  applyPreviewColor(e.target.value);
+});
+
+colorHexInput.addEventListener("input", (e) => {
+  const value = normalizedHex(e.target.value);
+  if (isValidHexColor(value)) {
+    applyPreviewColor(value);
+  } else {
+    colorPickerError.textContent = "Enter a valid 6-digit hex color, for example #3b82f6.";
+  }
+});
+
+colorApplyBtn.addEventListener("click", () => {
+  if (applyPreviewColor(colorHexInput.value)) {
+    closeLayerColorPicker(true);
+  }
+});
+
+colorCancelBtn.addEventListener("click", () => closeLayerColorPicker(false));
+colorPickerCloseBtn.addEventListener("click", () => closeLayerColorPicker(false));
+colorResetBtn.addEventListener("click", () => {
+  if (colorPickerState) applyPreviewColor(colorPickerState.defaultColor);
+});
+
+colorPickerModal.addEventListener("click", (e) => {
+  if (e.target === colorPickerModal) closeLayerColorPicker(false);
+});
+
+exportModal.addEventListener("click", (e) => {
+  if (e.target === exportModal) {
+    setExportModalOpen(false);
+  }
+});
+document.querySelectorAll('input[name="exportAnnotationMode"]').forEach(el => {
+  el.addEventListener("change", populateExportLayers);
+});
 
 zoomInput.addEventListener("input", applyZoom);
 zoomResetBtn.addEventListener("click", resetZoom);
+zoomResetFloatingBtn.addEventListener("click", resetZoom);
+zoomActualBtn.addEventListener("click", zoomActualSize);
 
 // ---- Zoom control buttons ----
 const zoomInBtn = document.getElementById("zoomInBtn");
@@ -1441,20 +2338,12 @@ function updateZoomButtonsUI() {
 }
 
 zoomInBtn.addEventListener("click", () => {
-  if (zoomMode === "magnify") {
-    zoomMode = "pan";
-  } else {
-    zoomMode = "magnify";
-  }
+  zoomByFactor(ZOOM_STEP);
   updateZoomButtonsUI();
 });
 
 zoomOutBtn.addEventListener("click", () => {
-  if (zoomMode === "demagnify") {
-    zoomMode = "pan";
-  } else {
-    zoomMode = "demagnify";
-  }
+  zoomByFactor(1 / ZOOM_STEP);
   updateZoomButtonsUI();
 });
 
@@ -1564,6 +2453,24 @@ document.addEventListener("keydown", (e) => {
   const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : "";
   if (tag === "input" || tag === "select" || tag === "textarea") return;
 
+  if (e.ctrlKey || e.metaKey) {
+    if (e.key === "+" || e.key === "=") {
+      e.preventDefault();
+      zoomByFactor(ZOOM_STEP);
+      return;
+    }
+    if (e.key === "-") {
+      e.preventDefault();
+      zoomByFactor(1 / ZOOM_STEP);
+      return;
+    }
+    if (e.key === "0") {
+      e.preventDefault();
+      resetZoom();
+      return;
+    }
+  }
+
   if (e.key === "ArrowLeft") stepFrame(-1);
   if (e.key === "ArrowRight") stepFrame(1);
 });
@@ -1571,7 +2478,11 @@ document.addEventListener("keydown", (e) => {
 // ---- init ----
 (async function init() {
   try {
+    initTheme();
+    initCanvasBackground();
     await loadDatasets();
+    updateExportFormatOptions();
+    updatePlaybackSpeed();
     await refreshAll();
     updateZoomButtonsUI();
   } catch (e) {

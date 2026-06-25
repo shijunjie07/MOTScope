@@ -13,6 +13,13 @@ import pandas as pd
 
 from ..datasets.models import DatasetDefinition
 from ..datasets.registry import DatasetRegistry
+from .annotations import (
+    clone_layer,
+    default_layers_for_sequence,
+    layer_payload,
+    parse_annotation_file,
+    resolve_layer_path,
+)
 
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp"}
 
@@ -29,6 +36,7 @@ class ViewerService:
         self.registry = registry
         self.vis_frames_cache: dict[tuple[str, float], list[int]] = {}
         self.meta_cache: dict[tuple[str, float, float], dict] = {}
+        self.annotation_payload_cache: dict[tuple, dict] = {}
 
     def natural_key(self, value: str):
         """Build a natural-sort key for mixed text and digits.
@@ -118,6 +126,32 @@ class ViewerService:
 
         files.sort(key=key)
         return files
+
+    def sequence_frame_files(self, dataset_name: str | None, split: str, seq: str) -> list[Path]:
+        """Return all image files for a sequence in natural frame order."""
+        _, _, img_dir, files = self.get_files_and_idx(dataset_name, split, seq)
+        if not img_dir:
+            raise FileNotFoundError("image directory not found")
+        if not files:
+            raise FileNotFoundError("no image frames found")
+        return files
+
+    def frame_path_for_mot_frame(
+        self,
+        dataset_name: str | None,
+        split: str,
+        seq: str,
+        frame_number: int,
+    ) -> Path:
+        """Resolve a MOT frame number or 1-based index to an image path."""
+        files = self.sequence_frame_files(dataset_name, split, seq)
+        for path in files:
+            if self.parse_frame_num_from_name(path.name) == int(frame_number):
+                return path
+        idx = int(frame_number) - 1
+        if 0 <= idx < len(files):
+            return files[idx]
+        raise ValueError(f"Invalid frame index: {frame_number}")
 
     def get_gt_path(self, dataset: DatasetDefinition, seq_dir: Path) -> Path | None:
         """Resolve the first available GT file for a sequence.
@@ -458,6 +492,76 @@ class ViewerService:
             return {"gameinfo": {}, "seqinfo": {}}
         dataset, seq_dir = self.get_seq_dir(dataset_name, split, seq)
         return self.load_meta(dataset, seq_dir)
+
+    def sequence_fps(self, dataset_name: str | None, split: str, seq: str) -> float:
+        """Return sequence FPS from seqinfo.ini, falling back to 25."""
+        meta = self.sequence_meta(dataset_name, split, seq)
+        value = (meta.get("seqinfo") or {}).get("frameRate", "")
+        try:
+            fps = float(value)
+        except (TypeError, ValueError):
+            fps = 25.0
+        return fps if fps > 0 else 25.0
+
+    def configured_annotation_layers(
+        self,
+        dataset: DatasetDefinition,
+        seq_dir: Path,
+    ) -> list:
+        """Resolve configured layers or derive backward-compatible defaults."""
+        if dataset.annotation_layers:
+            return [clone_layer(layer) for layer in dataset.annotation_layers]
+        det_files = self._list_annotation_dir(seq_dir / "det")
+        return default_layers_for_sequence(dataset, seq_dir, self.get_gt_path(dataset, seq_dir), det_files)
+
+    def annotation_payload(self, dataset_name: str | None, split: str, seq: str) -> dict:
+        """Load all configured annotation layers once and group boxes by frame."""
+        if not seq:
+            return {"fps": 25, "first_frame": 1, "frame_count": 0, "layers": [], "frames": {}, "warnings": []}
+
+        dataset, seq_dir, img_dir, files = self.get_files_and_idx(dataset_name, split, seq)
+        if not img_dir:
+            raise FileNotFoundError("image directory not found")
+        frame_numbers = [self.parse_frame_num_from_name(path.name) for path in files]
+        frame_numbers = [num for num in frame_numbers if num is not None]
+        first_frame = int(frame_numbers[0]) if frame_numbers else 1
+        layer_defs = self.configured_annotation_layers(dataset, seq_dir)
+        layer_mtimes = []
+        for layer in layer_defs:
+            try:
+                path = resolve_layer_path(seq_dir, layer)
+                layer_mtimes.append((str(path), path.stat().st_mtime if path.exists() else 0))
+            except FileNotFoundError:
+                layer_mtimes.append((layer.path, 0))
+        cache_key = (dataset.name, split, seq, len(files), tuple(layer_mtimes))
+        if cache_key in self.annotation_payload_cache:
+            return self.annotation_payload_cache[cache_key]
+
+        layers = []
+        grouped: dict[str, dict[str, list[dict]]] = {}
+        warnings: list[str] = []
+        for layer in layer_defs:
+            layers.append(layer_payload(layer))
+            try:
+                path = resolve_layer_path(seq_dir, layer)
+            except FileNotFoundError as exc:
+                warnings.append(str(exc))
+                continue
+            frames, layer_warnings = parse_annotation_file(path, layer.name)
+            warnings.extend(layer_warnings)
+            for frame, boxes in frames.items():
+                grouped.setdefault(str(frame), {})[layer.name] = boxes
+
+        payload = {
+            "fps": self.sequence_fps(dataset_name, split, seq),
+            "first_frame": first_frame,
+            "frame_count": len(files),
+            "layers": layers,
+            "frames": grouped,
+            "warnings": warnings,
+        }
+        self.annotation_payload_cache[cache_key] = payload
+        return payload
 
     def render_raw(self, dataset_name: str | None, split: str, seq: str, frame_idx: int, frame_mode: str, frame_value: str):
         """Load one raw image frame from disk.

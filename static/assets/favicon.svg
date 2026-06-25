@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="MOTScope favicon">
+  <defs>
+    <linearGradient id="favGradient" x1="8" y1="9" x2="56" y2="55" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14b8a6"/>
+      <stop offset="0.55" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#f8fafc"/>
+  <rect x="12" y="14" width="40" height="34" rx="6" fill="none" stroke="url(#favGradient)" stroke-width="4"/>
+  <rect x="20" y="22" width="10" height="9" rx="2" fill="none" stroke="#14b8a6" stroke-width="3"/>
+  <rect x="36" y="29" width="12" height="11" rx="2" fill="none" stroke="#8b5cf6" stroke-width="3"/>
+  <path d="M25 36c7 8 15 11 24 9" fill="none" stroke="#3b82f6" stroke-width="3" stroke-linecap="round"/>
+</svg>
