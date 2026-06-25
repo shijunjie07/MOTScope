@@ -1,8 +1,12 @@
-# MOT Viewer
+<p align="center">
+  <img src="docs/assets/motscope_logo_rect.png" alt="MOTScope logo" width="720">
+</p>
 
-A lightweight Flask-based viewer for inspecting Multi-Object Tracking (MOT) datasets.
+# MOTScope
 
-![MOT Viewer demo](docs/assets/mot_viewer.png)
+A lightweight visual inspection tool for multi-object tracking datasets, detections, and tracker outputs.
+
+![MOTScope demo](docs/assets/mot_viewer.png)
 
 
 
@@ -20,7 +24,7 @@ A lightweight Flask-based viewer for inspecting Multi-Object Tracking (MOT) data
 
 ## Overview
 
-MOT Viewer provides a simple browser interface for inspecting tracking datasets without writing custom visualization scripts. It is designed for quick validation of dataset structure, annotation quality, and sequence-level consistency.
+MOTScope provides a simple browser interface for inspecting tracking datasets without writing custom visualization scripts. It is designed for quick validation of dataset structure, annotation quality, and sequence-level consistency.
 
 The viewer supports common MOT-style datasets such as SoccerNet-Tracking and DanceTrack, and can be easily extended to custom datasets through a configuration file or the web interface.
 
@@ -34,6 +38,8 @@ The viewer supports common MOT-style datasets such as SoccerNet-Tracking and Dan
 - Toggle layers, IDs, scores, and score thresholds in the browser
 - Use smooth video playback through a cached MP4 with canvas overlays
 - Export frames, image-sequence ZIPs, and MP4 videos
+- Use a light default theme with a persistent dark mode option
+- Trigger export downloads automatically, with a `Download again` fallback link
 - Switch between multiple datasets in the browser  
 - Register new datasets without modifying source code  
 - Configure dataset-specific layouts (splits, folders, filenames)  
@@ -112,7 +118,7 @@ export MOT_VIEWER_DATASETS_CONFIG=/path/to/datasets.json
 
 ### Option 1: Web UI
 
-Use the **Add Dataset** button in the top toolbar. The dataset form opens as a modal dialog instead of occupying the navigation sidebar. Provide:
+Use **File -> Add Dataset...**. The dataset form opens as a modal dialog instead of occupying the navigation sidebar. Provide:
 
 * Dataset root path
 * Available splits
@@ -143,14 +149,18 @@ Datasets are loaded at startup, and changes from the UI are written back to this
 
 ## Application Layout
 
-The viewer uses a draw.io-style application layout:
+MOTScope uses a draw.io-style application layout:
 
 * top menu bar for high-level commands
-* top toolbar for common actions such as Add Dataset, Export, playback mode, playback controls, speed, zoom, and refresh
-* left sidebar for dataset, split, sequence, frame navigation, and review jumps
+* File menu for Add Dataset, Export, config location, and refresh
+* compact top toolbar for playback mode, previous/play/stop/next, speed, theme toggle, and refresh
+* left sidebar for dataset navigation, Layers, Annotation Source, Display, and review jumps
 * central viewer workspace for frame canvas or smooth video playback
-* right inspector for annotation layers, display properties, selected box details, and sequence metadata
+* floating viewer controls for fit, zoom, pan, and rectangle zoom
+* right inspector reserved for selected box details and sequence metadata
 * modal dialogs for Add Dataset, Export, and long-running progress states
+
+The app opens in light mode by default. Use **View -> Theme: Dark** or the toolbar theme button to switch modes. The selected theme is stored in local browser storage.
 
 
 ## Multiple Annotation Layers
@@ -190,6 +200,10 @@ Existing configs that only define `gt_files` still work. To show GT and detectio
 
 Layer paths are relative to each sequence folder, such as `<dataset-root>/<split>/<sequence>/gt/gt.txt`. If `annotation_layers` is omitted, the viewer derives a Ground Truth layer from `gt_files` and, when present, a Detections layer from `det/det.txt`.
 
+Layer cards live in the left sidebar. Each card has a header with the layer color, name, type badge, and color swatch; a master **Show this layer** switch; display options for bounding boxes, IDs, and scores; and a per-layer score threshold.
+
+Click a layer swatch to edit color. The color picker previews immediately, stays open while you choose a color, supports manual hex values such as `#00ff00`, and offers Apply, Cancel, and Reset default actions.
+
 
 ## Smooth Video Playback
 
@@ -202,10 +216,22 @@ Smooth playback requires `ffmpeg` on the system path. If `ffmpeg` is missing or 
 
 Smooth videos are cached under `instance/video_cache/` with a sequence signature based on dataset, split, sequence, image directory, frame count, FPS, and first/last frame names. The viewer checks cached MP4 duration with `ffprobe`; stale or too-short cache files are regenerated.
 
+The V3 UI keeps the V2 full-duration smooth-video fix and only changes the surrounding controls/progress behavior.
+
+## Viewer Shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| Ctrl + mouse wheel | Zoom around cursor |
+| Ctrl + + | Zoom in |
+| Ctrl + - | Zoom out |
+| Ctrl + 0 | Fit/reset view |
+| Shift + left drag | Pan/drag image |
+
 
 ## Exporting
 
-Use the **Export** button in the top toolbar or menu bar. The export workflow opens as a modal dialog where you choose a target, annotation mode, selected layers, and format. Generated files are written under `instance/exports/` and returned as browser download links.
+Use **File -> Export...**. The export workflow opens as a modal dialog where you choose a target, annotation mode, selected layers, and format. Generated files are written under `instance/exports/`, the browser download starts automatically after completion, and a `Download again` link remains available if the browser blocks the automatic download.
 
 Smooth video generation and exports run through background jobs. The browser shows a progress modal with percentage and messages such as `Preparing frame 315 / 750`, `Rendering frame 450 / 750`, or `Encoding MP4`.
 
@@ -241,7 +267,7 @@ The V2 cache uses a signature and duration validation to avoid reusing stale sho
 
 ### GT and detections do not appear together
 
-Confirm both layers are present in `annotation_layers` or that the sequence contains both `gt/gt.txt` and `det/det.txt`. In the right inspector, layer visibility uses independent checkboxes, so multiple layers can stay enabled at the same time.
+Confirm both layers are present in `annotation_layers` or that the sequence contains both `gt/gt.txt` and `det/det.txt`. In the left sidebar, layer visibility uses independent **Show this layer** switches, so multiple layers can stay enabled at the same time.
 
 
 

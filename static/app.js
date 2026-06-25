@@ -1,4 +1,13 @@
 const datasetSelect = document.getElementById("datasetSelect");
+const fileMenuBtn = document.getElementById("fileMenuBtn");
+const fileMenuDropdown = document.getElementById("fileMenuDropdown");
+const viewMenuBtn = document.getElementById("viewMenuBtn");
+const viewMenuDropdown = document.getElementById("viewMenuDropdown");
+const themeLightBtn = document.getElementById("themeLightBtn");
+const themeDarkBtn = document.getElementById("themeDarkBtn");
+const themeToggleBtn = document.getElementById("themeToggleBtn");
+const refreshMenuBtn = document.getElementById("refreshMenuBtn");
+const openConfigFolderBtn = document.getElementById("openConfigFolderBtn");
 const toggleDatasetFormBtn = document.getElementById("toggleDatasetFormBtn");
 const datasetFormPanel = document.getElementById("datasetFormPanel");
 const datasetNameInput = document.getElementById("datasetNameInput");
@@ -53,6 +62,8 @@ const lockedBoxInfo = document.getElementById("lockedBoxInfo");
 const zoomInput = document.getElementById("zoomInput");
 const zoomResetBtn = document.getElementById("zoomResetBtn");
 const zoomHint = document.getElementById("zoomHint");
+const zoomReadout = document.getElementById("zoomReadout");
+const zoomResetFloatingBtn = document.getElementById("zoomResetFloatingBtn");
 const minimapCanvas = document.getElementById("minimapCanvas");
 const minimapRect = document.getElementById("minimapRect");
 const videoStage = document.getElementById("videoStage");
@@ -74,6 +85,16 @@ const progressFill = document.getElementById("progressFill");
 const progressPercent = document.getElementById("progressPercent");
 const progressMessage = document.getElementById("progressMessage");
 const progressCloseBtn = document.getElementById("progressCloseBtn");
+const colorPickerModal = document.getElementById("colorPickerModal");
+const colorPickerTitle = document.getElementById("colorPickerTitle");
+const colorPickerCloseBtn = document.getElementById("colorPickerCloseBtn");
+const colorPickerInput = document.getElementById("colorPickerInput");
+const colorHexInput = document.getElementById("colorHexInput");
+const colorPickerPreview = document.getElementById("colorPickerPreview");
+const colorPickerError = document.getElementById("colorPickerError");
+const colorResetBtn = document.getElementById("colorResetBtn");
+const colorCancelBtn = document.getElementById("colorCancelBtn");
+const colorApplyBtn = document.getElementById("colorApplyBtn");
 
 // Canvas
 const canvas = document.getElementById("frameCanvas");
@@ -90,6 +111,7 @@ let videoInfo = null;
 let videoAnimationId = null;
 let hoveredIndex = -1;
 let lockedBoxIndex = -1;
+let colorPickerState = null;
 
 // Playback state
 let isPlaying = false;
@@ -111,6 +133,7 @@ let rectSelectStartY = 0;
 let isRectSelecting = false;
 
 const EPS_VIS = 1e-6;
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
 // text size
 const ID_FONT_PX = 18;
@@ -156,6 +179,46 @@ function getRadio(name, fallback) {
 function setRadio(name, value) {
   const el = document.querySelector(`input[name="${name}"][value="${value}"]`);
   if (el) el.checked = true;
+}
+
+function closeMenus() {
+  for (const [button, menu] of [[fileMenuBtn, fileMenuDropdown], [viewMenuBtn, viewMenuDropdown]]) {
+    if (!button || !menu) continue;
+    menu.hidden = true;
+    button.classList.remove("active");
+    button.setAttribute("aria-expanded", "false");
+  }
+}
+
+function toggleMenu(button, menu) {
+  if (!button || !menu) return;
+  const shouldOpen = menu.hidden;
+  closeMenus();
+  menu.hidden = !shouldOpen;
+  button.classList.toggle("active", shouldOpen);
+  button.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+}
+
+function applyTheme(theme) {
+  const nextTheme = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = nextTheme;
+  localStorage.setItem("motscope-theme", nextTheme);
+  if (themeToggleBtn) {
+    themeToggleBtn.textContent = nextTheme === "dark" ? "Light" : "Dark";
+    themeToggleBtn.title = nextTheme === "dark" ? "Switch to light theme" : "Switch to dark theme";
+  }
+}
+
+function initTheme() {
+  applyTheme(localStorage.getItem("motscope-theme") || "light");
+}
+
+function isValidHexColor(value) {
+  return HEX_COLOR_RE.test(String(value || "").trim());
+}
+
+function normalizedHex(value) {
+  return String(value || "").trim().toLowerCase();
 }
 
 function throttle(fn, waitMs) {
@@ -262,6 +325,74 @@ function updateLayerState(name, patch) {
   redrawActiveViewer();
 }
 
+function layerDefaultColor(name) {
+  const payloadLayer = annotationPayload && annotationPayload.layers
+    ? annotationPayload.layers.find(layer => layer.name === name)
+    : null;
+  return (payloadLayer && payloadLayer.color) || "#3b82f6";
+}
+
+function layerTypeLabel(layer) {
+  const type = String(layer.type || "").trim().toUpperCase();
+  if (type) return type;
+  const name = String(layer.name || "").toLowerCase();
+  if (name.includes("det")) return "DET";
+  if (name.includes("track")) return "TRACK";
+  return "GT";
+}
+
+function updateColorPickerPreview(value) {
+  colorPickerInput.value = value;
+  colorHexInput.value = value;
+  colorPickerPreview.style.background = value;
+}
+
+function applyPreviewColor(value) {
+  if (!colorPickerState) return false;
+  const color = normalizedHex(value);
+  if (!isValidHexColor(color)) {
+    colorPickerError.textContent = "Enter a valid 6-digit hex color, for example #3b82f6.";
+    return false;
+  }
+  colorPickerError.textContent = "";
+  updateColorPickerPreview(color);
+  updateLayerState(colorPickerState.layerName, { color });
+  for (const swatch of document.querySelectorAll("[data-layer-color]")) {
+    if (swatch.getAttribute("data-layer-color") === colorPickerState.layerName) {
+      swatch.style.background = color;
+    }
+  }
+  return true;
+}
+
+function openLayerColorPicker(layerName) {
+  const settings = getLayerSettings(layerName);
+  const originalColor = normalizedHex(settings.color || layerDefaultColor(layerName));
+  colorPickerState = {
+    layerName,
+    originalColor,
+    defaultColor: normalizedHex(layerDefaultColor(layerName)),
+  };
+  colorPickerTitle.textContent = `Layer Color: ${layerName}`;
+  colorPickerError.textContent = "";
+  updateColorPickerPreview(originalColor);
+  colorPickerModal.style.display = "flex";
+  colorHexInput.focus();
+}
+
+function closeLayerColorPicker(commit) {
+  if (!colorPickerState) {
+    colorPickerModal.style.display = "none";
+    return;
+  }
+  if (!commit) {
+    updateLayerState(colorPickerState.layerName, { color: colorPickerState.originalColor });
+  }
+  colorPickerState = null;
+  colorPickerModal.style.display = "none";
+  renderLayerControls();
+}
+
 function redrawActiveViewer() {
   if (playbackModeSelect.value === "smooth") {
     drawVideoOverlay();
@@ -332,25 +463,32 @@ function renderLayerControls() {
     const item = document.createElement("div");
     item.className = "layerItem";
     const key = layerKey(layer.name);
+    const layerType = layerTypeLabel(layer);
+    const threshold = parseFloat(settings.score_threshold || 0) || 0;
+    const isGT = String(layer.type || "").toLowerCase() === "gt";
     item.innerHTML = `
       <div class="layerHeader">
-        <span class="layerSwatch" style="background:${settings.color}"></span>
+        <span class="layerSwatch" data-layer-color="${layer.name}" style="background:${settings.color}"></span>
         <span class="layerName" title="${layer.name}">${layer.name}</span>
-        <input type="color" id="layerColor_${key}" value="${settings.color || "#35e6fd"}" />
+        <span class="layerBadge">${layerType}</span>
+        <button type="button" class="layerColorButton" id="layerColor_${key}" data-layer-color="${layer.name}" style="background:${settings.color || "#3b82f6"}" title="Change layer color"></button>
       </div>
       <div class="layerOptions">
-        <label class="check"><input type="checkbox" id="layerVisible_${key}" ${settings.visible !== false ? "checked" : ""} /> Visible</label>
-        <label class="check"><input type="checkbox" id="layerDrawId_${key}" ${settings.draw_id !== false ? "checked" : ""} /> ID</label>
-        <label class="check"><input type="checkbox" id="layerDrawScore_${key}" ${settings.draw_score === true ? "checked" : ""} /> Score</label>
-        <label>Min score: <span id="layerThresholdText_${key}">${(parseFloat(settings.score_threshold || 0) || 0).toFixed(2)}</span></label>
-        <input type="range" id="layerThreshold_${key}" min="0" max="1" step="0.01" value="${parseFloat(settings.score_threshold || 0) || 0}" />
+        <div class="layerSectionLabel">Layer visibility</div>
+        <label class="switchRow"><input type="checkbox" id="layerVisible_${key}" ${settings.visible !== false ? "checked" : ""} /> <span>Show this layer</span></label>
+        <div class="layerSectionLabel">Display options</div>
+        <label class="check"><input type="checkbox" id="layerDrawBBox_${key}" checked disabled /> Bounding box</label>
+        <label class="check"><input type="checkbox" id="layerDrawId_${key}" ${settings.draw_id !== false ? "checked" : ""} /> ID label</label>
+        <label class="check"><input type="checkbox" id="layerDrawScore_${key}" ${settings.draw_score === true ? "checked" : ""} /> Score label</label>
+        <div class="layerSectionLabel">Score threshold</div>
+        <div class="thresholdRow"><span>Min score</span><span id="layerThresholdText_${key}">${threshold.toFixed(2)}</span></div>
+        <input type="range" id="layerThreshold_${key}" min="0" max="1" step="0.01" value="${threshold}" ${isGT ? "disabled" : ""} />
       </div>
     `;
     layerControls.appendChild(item);
 
-    document.getElementById(`layerColor_${key}`).addEventListener("input", (e) => {
-      updateLayerState(layer.name, { color: e.target.value });
-      renderLayerControls();
+    document.getElementById(`layerColor_${key}`).addEventListener("click", () => {
+      openLayerColorPicker(layer.name);
     });
     document.getElementById(`layerVisible_${key}`).addEventListener("change", (e) => {
       updateLayerState(layer.name, { visible: e.target.checked });
@@ -668,6 +806,7 @@ function setZoomLevel(newZoom, anchorCanvasX = canvas.width / 2, anchorCanvasY =
     zoomLevel = clampedZoom;
     zoomInput.value = Math.round(zoomLevel * 100);
     zoomHint.textContent = `${Math.round(zoomLevel * 100)}%`;
+    if (zoomReadout) zoomReadout.textContent = `${Math.round(zoomLevel * 100)}%`;
     return;
   }
 
@@ -684,6 +823,7 @@ function setZoomLevel(newZoom, anchorCanvasX = canvas.width / 2, anchorCanvasY =
 
   zoomInput.value = Math.round(zoomLevel * 100);
   zoomHint.textContent = `${Math.round(zoomLevel * 100)}%`;
+  if (zoomReadout) zoomReadout.textContent = `${Math.round(zoomLevel * 100)}%`;
 }
 
 function applyZoom() {
@@ -702,6 +842,24 @@ function resetZoom() {
   panY = center.y;
   zoomInput.value = 100;
   zoomHint.textContent = "100%";
+  if (zoomReadout) zoomReadout.textContent = "100%";
+  drawScene();
+  updateMinimap();
+  updateMinimapVisibility();
+}
+
+function canvasPointFromEvent(e) {
+  const rect = canvas.getBoundingClientRect();
+  const sx = canvas.width / rect.width;
+  const sy = canvas.height / rect.height;
+  return {
+    x: (e.clientX - rect.left) * sx,
+    y: (e.clientY - rect.top) * sy,
+  };
+}
+
+function zoomByFactor(factor, anchorX = canvas.width / 2, anchorY = canvas.height / 2) {
+  setZoomLevel(zoomLevel * factor, anchorX, anchorY);
   drawScene();
   updateMinimap();
   updateMinimapVisibility();
@@ -1186,8 +1344,9 @@ let clickStartY = 0;
 canvas.addEventListener("mousedown", (e) => {
   clickStartX = e.clientX;
   clickStartY = e.clientY;
+  if (e.button !== 0) return;
   // Handle different modes
-  if (zoomMode === "pan") {
+  if (e.shiftKey || e.code === "Space" || zoomMode === "pan") {
     if (zoomLevel <= 1) return; // Only pan when zoomed
     isDragging = true;
     dragStartX = e.clientX;
@@ -1336,6 +1495,13 @@ canvas.addEventListener("mouseup", (e) => {
 canvas.addEventListener("mouseleave", () => {
   isDragging = false;
 });
+
+canvas.addEventListener("wheel", (e) => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  const point = canvasPointFromEvent(e);
+  zoomByFactor(e.deltaY < 0 ? 1.12 : 1 / 1.12, point.x, point.y);
+}, { passive: false });
 
 // ---- load image + boxes ----
 let renderAbort = null;
@@ -1681,11 +1847,36 @@ function selectedExportLayers(mode) {
   return selected;
 }
 
+function exportLayerOverrides() {
+  const out = {};
+  if (!annotationPayload || !annotationPayload.layers) return out;
+  for (const layer of annotationPayload.layers) {
+    const settings = getLayerSettings(layer.name);
+    out[layer.name] = {
+      color: settings.color,
+      visible: settings.visible !== false,
+      draw_id: settings.draw_id !== false,
+      draw_score: settings.draw_score === true,
+      score_threshold: parseFloat(settings.score_threshold || 0) || 0,
+    };
+  }
+  return out;
+}
+
 function currentExportFrame() {
   if (currentMotFrame !== null && currentMotFrame !== undefined) return currentMotFrame;
   const idx = parseInt(frameSlider.value || "0", 10);
   const first = lastFrameInfo && lastFrameInfo.min_frame ? parseInt(lastFrameInfo.min_frame, 10) : 1;
   return first + idx;
+}
+
+function triggerDownload(downloadUrl, filename = null) {
+  const link = document.createElement("a");
+  link.href = downloadUrl;
+  if (filename) link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 async function runExport() {
@@ -1699,6 +1890,7 @@ async function runExport() {
     include_annotations: mode !== "none",
     annotation_mode: mode,
     selected_layers: selectedExportLayers(mode),
+    layer_overrides: exportLayerOverrides(),
     format: exportFormat.value,
     fps: annotationPayload ? annotationPayload.fps : 25,
   };
@@ -1711,7 +1903,11 @@ async function runExport() {
       target === "video" ? "Exporting Annotated Video" : "Exporting"
     );
     if (!result.available) throw new Error(result.error || "Export unavailable");
-    exportStatus.innerHTML = `<a class="exportLink" href="${result.download_url}">Download export</a>`;
+    const downloadUrl = result.download_url;
+    const filename = downloadUrl ? downloadUrl.split("/").pop() : null;
+    if (!downloadUrl) throw new Error("Export completed without a download URL");
+    triggerDownload(downloadUrl, filename);
+    exportStatus.innerHTML = `Export complete. Download started. <a class="exportLink" href="${downloadUrl}">Download again</a>`;
   } catch (e) {
     exportStatus.textContent = `Export failed: ${e.message}`;
   } finally {
@@ -1772,6 +1968,40 @@ function stepFrame(delta) {
 }
 
 // ---- events ----
+fileMenuBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleMenu(fileMenuBtn, fileMenuDropdown);
+});
+
+viewMenuBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  toggleMenu(viewMenuBtn, viewMenuDropdown);
+});
+
+document.addEventListener("click", closeMenus);
+
+fileMenuDropdown.addEventListener("click", (e) => {
+  e.stopPropagation();
+  closeMenus();
+});
+
+viewMenuDropdown.addEventListener("click", (e) => {
+  e.stopPropagation();
+  closeMenus();
+});
+
+themeLightBtn.addEventListener("click", () => applyTheme("light"));
+themeDarkBtn.addEventListener("click", () => applyTheme("dark"));
+themeToggleBtn.addEventListener("click", () => {
+  const current = document.documentElement.dataset.theme || "light";
+  applyTheme(current === "dark" ? "light" : "dark");
+});
+
+refreshMenuBtn.addEventListener("click", refreshAll);
+openConfigFolderBtn.addEventListener("click", () => {
+  setStatus("Config folder: instance/datasets.json");
+});
+
 datasetSelect.addEventListener("change", () => {
   stopPlayback();
   refreshAll();
@@ -1944,13 +2174,45 @@ sequenceVideo.addEventListener("ended", () => {
 exportTarget.addEventListener("change", updateExportFormatOptions);
 exportBtn.addEventListener("click", runExport);
 openExportBtn.addEventListener("click", () => setExportModalOpen(true));
-openExportMenuBtn.addEventListener("click", () => setExportModalOpen(true));
+if (openExportMenuBtn) {
+  openExportMenuBtn.addEventListener("click", () => setExportModalOpen(true));
+}
 exportCancelBtn.addEventListener("click", () => setExportModalOpen(false));
 progressCloseBtn.addEventListener("click", () => {
   if (!activeProgressJob) {
     progressModal.style.display = "none";
   }
 });
+
+colorPickerInput.addEventListener("input", (e) => {
+  applyPreviewColor(e.target.value);
+});
+
+colorHexInput.addEventListener("input", (e) => {
+  const value = normalizedHex(e.target.value);
+  if (isValidHexColor(value)) {
+    applyPreviewColor(value);
+  } else {
+    colorPickerError.textContent = "Enter a valid 6-digit hex color, for example #3b82f6.";
+  }
+});
+
+colorApplyBtn.addEventListener("click", () => {
+  if (applyPreviewColor(colorHexInput.value)) {
+    closeLayerColorPicker(true);
+  }
+});
+
+colorCancelBtn.addEventListener("click", () => closeLayerColorPicker(false));
+colorPickerCloseBtn.addEventListener("click", () => closeLayerColorPicker(false));
+colorResetBtn.addEventListener("click", () => {
+  if (colorPickerState) applyPreviewColor(colorPickerState.defaultColor);
+});
+
+colorPickerModal.addEventListener("click", (e) => {
+  if (e.target === colorPickerModal) closeLayerColorPicker(false);
+});
+
 exportModal.addEventListener("click", (e) => {
   if (e.target === exportModal) {
     setExportModalOpen(false);
@@ -1962,6 +2224,7 @@ document.querySelectorAll('input[name="exportAnnotationMode"]').forEach(el => {
 
 zoomInput.addEventListener("input", applyZoom);
 zoomResetBtn.addEventListener("click", resetZoom);
+zoomResetFloatingBtn.addEventListener("click", resetZoom);
 
 // ---- Zoom control buttons ----
 const zoomInBtn = document.getElementById("zoomInBtn");
@@ -1983,20 +2246,12 @@ function updateZoomButtonsUI() {
 }
 
 zoomInBtn.addEventListener("click", () => {
-  if (zoomMode === "magnify") {
-    zoomMode = "pan";
-  } else {
-    zoomMode = "magnify";
-  }
+  zoomByFactor(1.15);
   updateZoomButtonsUI();
 });
 
 zoomOutBtn.addEventListener("click", () => {
-  if (zoomMode === "demagnify") {
-    zoomMode = "pan";
-  } else {
-    zoomMode = "demagnify";
-  }
+  zoomByFactor(1 / 1.15);
   updateZoomButtonsUI();
 });
 
@@ -2106,6 +2361,24 @@ document.addEventListener("keydown", (e) => {
   const tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : "";
   if (tag === "input" || tag === "select" || tag === "textarea") return;
 
+  if (e.ctrlKey || e.metaKey) {
+    if (e.key === "+" || e.key === "=") {
+      e.preventDefault();
+      zoomByFactor(1.15);
+      return;
+    }
+    if (e.key === "-") {
+      e.preventDefault();
+      zoomByFactor(1 / 1.15);
+      return;
+    }
+    if (e.key === "0") {
+      e.preventDefault();
+      resetZoom();
+      return;
+    }
+  }
+
   if (e.key === "ArrowLeft") stepFrame(-1);
   if (e.key === "ArrowRight") stepFrame(1);
 });
@@ -2113,6 +2386,7 @@ document.addEventListener("keydown", (e) => {
 // ---- init ----
 (async function init() {
   try {
+    initTheme();
     await loadDatasets();
     updateExportFormatOptions();
     updatePlaybackSpeed();

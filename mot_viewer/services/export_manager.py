@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import copy
 import html
+import re
 import shutil
 import subprocess
 import tempfile
@@ -58,6 +60,30 @@ def selected_layer_names(payload: dict, request_payload: dict) -> list[str]:
             raise ValueError(f"Invalid layer name(s): {', '.join(sorted(missing))}")
         return [layer["name"] for layer in layers if layer["name"] in selected]
     return [layer["name"] for layer in layers if layer.get("visible", True)]
+
+
+def apply_layer_overrides(annotation_payload: dict, request_payload: dict) -> dict:
+    """Apply client-side layer display settings before export rendering."""
+    overrides = request_payload.get("layer_overrides") or {}
+    if not isinstance(overrides, dict):
+        return annotation_payload
+    known = {layer.get("name"): layer for layer in annotation_payload.get("layers", [])}
+    for name, patch in overrides.items():
+        layer = known.get(name)
+        if not layer or not isinstance(patch, dict):
+            continue
+        color = str(patch.get("color") or "").strip()
+        if re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+            layer["color"] = color
+        for key in ("visible", "draw_id", "draw_score"):
+            if key in patch:
+                layer[key] = bool(patch[key])
+        if "score_threshold" in patch:
+            try:
+                layer["score_threshold"] = max(0.0, min(1.0, float(patch["score_threshold"])))
+            except (TypeError, ValueError):
+                pass
+    return annotation_payload
 
 
 def boxes_for_frame(payload: dict, frame_number: int, selected_layers: list[str]) -> list[dict]:
@@ -184,6 +210,8 @@ class ExportManager:
             payload.get("split", ""),
             payload.get("sequence", ""),
         )
+        annotation_payload = copy.deepcopy(annotation_payload)
+        annotation_payload = apply_layer_overrides(annotation_payload, payload)
         return annotation_payload, selected_layer_names(annotation_payload, payload)
 
     def export_frame(self, payload: dict, progress: Callable[[int, str], None] | None = None) -> Path:

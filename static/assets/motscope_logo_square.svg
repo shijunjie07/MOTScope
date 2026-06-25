@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="MOTScope logo">
+  <defs>
+    <linearGradient id="scopeGradient" x1="16" y1="18" x2="112" y2="110" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14b8a6"/>
+      <stop offset="0.52" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="#f8fafc"/>
+  <rect x="22" y="25" width="84" height="68" rx="10" fill="none" stroke="url(#scopeGradient)" stroke-width="7"/>
+  <rect x="36" y="39" width="20" height="18" rx="4" fill="none" stroke="#14b8a6" stroke-width="5"/>
+  <rect x="73" y="54" width="24" height="22" rx="4" fill="none" stroke="#8b5cf6" stroke-width="5"/>
+  <path d="M48 66c13 15 29 21 47 18" fill="none" stroke="#3b82f6" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="48" cy="66" r="5" fill="#14b8a6"/>
+  <circle cx="95" cy="84" r="5" fill="#8b5cf6"/>
+</svg>

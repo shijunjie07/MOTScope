@@ -11,7 +11,7 @@ import numpy as np
 from mot_viewer import create_app
 from mot_viewer.config import AppConfig
 from mot_viewer.datasets.registry import DatasetRegistry
-from mot_viewer.services.export_manager import validate_export_request
+from mot_viewer.services.export_manager import apply_layer_overrides, validate_export_request
 from mot_viewer.services.viewer import ViewerService
 
 
@@ -122,6 +122,12 @@ def main() -> None:
         assert validate_export_request("frame", "svg") == "svg"
         assert validate_export_request("images", "jpg") == "jpg"
         assert validate_export_request("video", "mp4") == "mp4"
+        overridden = apply_layer_overrides(
+            {"layers": [{"name": "Detections", "color": "#ff9900", "score_threshold": 0.0}]},
+            {"layer_overrides": {"Detections": {"color": "#3b82f6", "score_threshold": 0.75}}},
+        )
+        assert overridden["layers"][0]["color"] == "#3b82f6"
+        assert overridden["layers"][0]["score_threshold"] == 0.75
         for target, fmt in [("frame", "mp4"), ("video", "svg"), ("images", "mp4")]:
             try:
                 validate_export_request(target, fmt)
@@ -131,6 +137,17 @@ def main() -> None:
                 raise AssertionError(f"{target}/{fmt} should be invalid")
 
         client = app.test_client()
+        page = client.get("/")
+        assert page.status_code == 200, page.get_data(as_text=True)
+        html = page.get_data(as_text=True)
+        assert "MOTScope" in html
+        assert "/static/assets/motscope_logo_square.png" in html
+        assert 'id="fileMenuBtn"' in html
+        assert 'id="themeToggleBtn"' in html
+        assert 'id="layerControls"' in html
+        assert "Download again" in Path("static/app.js").read_text(encoding="utf-8")
+        assert Path("docs/assets/motscope_logo_rect.png").exists()
+
         response = client.get("/api/annotations?dataset=fixture&split=train&seq=seq001")
         assert response.status_code == 200, response.get_data(as_text=True)
         assert response.get_json()["frames"]["1"]["Ground Truth"]

@@ -3,26 +3,44 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>MOT Viewer</title>
+  <title>MOTScope</title>
+  <link rel="icon" href="/static/assets/favicon.svg" type="image/svg+xml" />
+  <link rel="alternate icon" href="/static/assets/favicon.png" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
   <div class="app-shell">
     <header class="app-menu-bar">
-      <div class="brand">MOT Viewer</div>
+      <div class="app-brand">
+        <img src="/static/assets/motscope_logo_square.png" alt="MOTScope logo" class="app-logo" />
+        <span class="app-title">MOTScope</span>
+      </div>
       <nav class="menu-items">
-        <button type="button">File</button>
+        <div class="menuRoot">
+          <button type="button" id="fileMenuBtn" class="menuButton" aria-haspopup="true" aria-expanded="false">File</button>
+          <div id="fileMenuDropdown" class="menuDropdown" role="menu" hidden>
+            <button id="toggleDatasetFormBtn" type="button" role="menuitem">Add Dataset...</button>
+            <button id="openExportBtn" type="button" role="menuitem">Export...</button>
+            <button id="openConfigFolderBtn" type="button" role="menuitem">Open Config Folder</button>
+            <button id="refreshMenuBtn" type="button" role="menuitem">Refresh</button>
+          </div>
+        </div>
         <button type="button">Dataset</button>
-        <button type="button">View</button>
-        <button type="button" id="openExportMenuBtn">Export</button>
+        <div class="menuRoot">
+          <button type="button" id="viewMenuBtn" class="menuButton" aria-haspopup="true" aria-expanded="false">View</button>
+          <div id="viewMenuDropdown" class="menuDropdown" role="menu" hidden>
+            <button id="themeLightBtn" type="button" role="menuitem">Theme: Light</button>
+            <button id="themeDarkBtn" type="button" role="menuitem">Theme: Dark</button>
+          </div>
+        </div>
+        <button type="button">Export</button>
         <button type="button">Help</button>
       </nav>
       <div id="statusText" class="status-pill">Ready</div>
     </header>
 
     <div class="app-toolbar">
-      <button id="toggleDatasetFormBtn" type="button" class="toolBtn">Add Dataset</button>
-      <button id="openExportBtn" type="button" class="toolBtn">Export</button>
+      <span class="toolbarLabel">Mode</span>
       <select id="playbackModeSelect" class="toolSelect">
         <option value="frame">Frame Inspection</option>
         <option value="smooth">Smooth Video</option>
@@ -38,10 +56,7 @@
         <option value="2">2x</option>
         <option value="4">4x</option>
       </select>
-      <button id="zoomInBtn" class="iconBtn" title="Zoom In">+</button>
-      <button id="zoomOutBtn" class="iconBtn" title="Zoom Out">-</button>
-      <button id="panBtn" class="iconBtn" title="Pan Mode">Pan</button>
-      <button id="rectZoomBtn" class="iconBtn" title="Rectangle Zoom">Rect</button>
+      <button id="themeToggleBtn" class="toolBtn secondaryBtn" type="button">Dark</button>
       <button id="refreshBtn" class="toolBtn secondaryBtn">Refresh</button>
     </div>
 
@@ -78,41 +93,11 @@
         </section>
 
         <section class="panel-section">
-          <div class="section-title">Review Jumps</div>
-          <div class="hint">Frames where vis != 1</div>
-          <div id="visList" class="visList"></div>
-        </section>
-      </aside>
-
-      <main class="viewer-workspace">
-        <div class="viewer-stage">
-          <div id="videoStage" class="videoStage" style="display: none;">
-            <video id="sequenceVideo" playsinline muted controls></video>
-            <canvas id="videoOverlayCanvas"></canvas>
-          </div>
-          <canvas id="frameCanvas"></canvas>
-
-          <div id="minimapOverlay" class="minimapOverlay" style="display: none;">
-            <div id="minimapContainer" class="minimapContainer">
-              <canvas id="minimapCanvas" class="minimapCanvas"></canvas>
-              <div id="minimapRect" class="minimapRect"></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="viewer-footer">
-          <div id="viewerInfo" class="viewerInfo">Frame</div>
-          <div id="hoverInfo" class="hoverInfo">Hover: none</div>
-        </div>
-      </main>
-
-      <aside class="right-inspector">
-        <section class="panel-section">
           <div class="section-title">Layers</div>
-          <label class="check"><input type="checkbox" id="showGT" checked /> Show Annotations</label>
-          <label class="check"><input type="checkbox" id="showBBox" checked /> BBox</label>
-          <label class="check"><input type="checkbox" id="showID" checked /> ID</label>
-          <label class="check"><input type="checkbox" id="showVis" checked /> Visibility Text</label>
+          <label class="switchRow"><input type="checkbox" id="showGT" checked /> <span>Show annotations</span></label>
+          <label class="check"><input type="checkbox" id="showBBox" checked /> Bounding boxes</label>
+          <label class="check"><input type="checkbox" id="showID" checked /> ID labels</label>
+          <label class="check"><input type="checkbox" id="showVis" checked /> Visibility text</label>
           <label class="check"><input type="checkbox" id="highlightVis" checked /> Highlight vis != 1</label>
           <div id="layerControls" class="layerControls"></div>
           <div id="layerWarnings" class="hint"></div>
@@ -136,10 +121,10 @@
 
         <section class="panel-section">
           <div class="section-title">Display</div>
-          <label>Box Base Color</label>
-          <input type="color" id="boxColor" value="#35e6fd" />
-          <label>Visibility Color</label>
-          <input type="color" id="visColor" value="#ff0000" />
+          <label>Box base color</label>
+          <input type="color" id="boxColor" value="#3b82f6" />
+          <label>Visibility color</label>
+          <input type="color" id="visColor" value="#ef4444" />
           <label class="check"><input type="radio" name="colorMode" value="fixed" checked /> Fixed</label>
           <label class="check"><input type="radio" name="colorMode" value="by_vis" /> By visibility</label>
           <div class="row">
@@ -150,6 +135,44 @@
           <div class="hint" id="speedHint">1x</div>
         </section>
 
+        <section class="panel-section">
+          <div class="section-title">Review Jumps</div>
+          <div class="hint">Frames where vis != 1</div>
+          <div id="visList" class="visList"></div>
+        </section>
+      </aside>
+
+      <main class="viewer-workspace">
+        <div class="viewer-stage">
+          <div id="videoStage" class="videoStage" style="display: none;">
+            <video id="sequenceVideo" playsinline muted controls></video>
+            <canvas id="videoOverlayCanvas"></canvas>
+          </div>
+          <canvas id="frameCanvas"></canvas>
+
+          <div id="minimapOverlay" class="minimapOverlay" style="display: none;">
+            <div id="minimapContainer" class="minimapContainer">
+              <canvas id="minimapCanvas" class="minimapCanvas"></canvas>
+              <div id="minimapRect" class="minimapRect"></div>
+            </div>
+          </div>
+          <div class="viewerControls" aria-label="Viewer controls">
+            <button id="zoomResetFloatingBtn" class="viewerControlBtn" type="button" title="Fit view">Fit</button>
+            <span id="zoomReadout" class="viewerZoomReadout">100%</span>
+            <button id="zoomInBtn" class="viewerControlBtn" type="button" title="Zoom in">+</button>
+            <button id="zoomOutBtn" class="viewerControlBtn" type="button" title="Zoom out">-</button>
+            <button id="panBtn" class="viewerControlBtn" type="button" title="Pan mode">Pan</button>
+            <button id="rectZoomBtn" class="viewerControlBtn" type="button" title="Rectangle zoom">Rect</button>
+          </div>
+        </div>
+
+        <div class="viewer-footer">
+          <div id="viewerInfo" class="viewerInfo">Frame</div>
+          <div id="hoverInfo" class="hoverInfo">Hover: none</div>
+        </div>
+      </main>
+
+      <aside class="right-inspector">
         <section class="panel-section">
           <div class="section-title">Selected Box</div>
           <div id="lockedBoxInfo" class="metaBody">No selection</div>
@@ -234,6 +257,28 @@
         </div>
         <div id="progressPercent" class="progressPercent">0%</div>
         <div id="progressMessage" class="hint">Starting</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="colorPickerModal" class="modalBackdrop colorPickerBackdrop" style="display: none;">
+    <div class="modalDialog colorPickerDialog">
+      <div class="modalHeader">
+        <h2 id="colorPickerTitle">Layer Color</h2>
+        <button id="colorPickerCloseBtn" type="button" class="iconBtn">Close</button>
+      </div>
+      <div class="modalBody">
+        <div id="colorPickerPreview" class="colorPreview"></div>
+        <label>Color</label>
+        <input id="colorPickerInput" type="color" value="#3b82f6" />
+        <label>Hex</label>
+        <input id="colorHexInput" type="text" value="#3b82f6" placeholder="#3b82f6" />
+        <div id="colorPickerError" class="hint errorText"></div>
+      </div>
+      <div class="modalFooter">
+        <button id="colorResetBtn" type="button" class="secondaryBtn">Reset default</button>
+        <button id="colorCancelBtn" type="button" class="secondaryBtn">Cancel</button>
+        <button id="colorApplyBtn" type="button">Apply</button>
       </div>
     </div>
   </div>
