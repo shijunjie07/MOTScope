@@ -4,180 +4,93 @@
 
 # MOTScope
 
-A lightweight visual inspection tool for multi-object tracking datasets, detections, and tracker outputs.
+MOTScope is a lightweight browser-based visual inspection tool for multi-object tracking datasets, detections, ground truth annotations, and tracker outputs.
 
-![MOTScope demo](docs/assets/mot_viewer.png)
+![MOTScope interface](docs/assets/motscope_interface.png)
 
-
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Installation](#installation)
-- [Usage](#run)
-- [Dataset Setup](#dataset-configuration)
-- [Roadmap](#roadmap)
-- [Contributing](#contributing)
-- [License](#license)
-
-
+Repository: https://github.com/shijunjie07/MOTScope
 
 ## Overview
 
-MOTScope provides a simple browser interface for inspecting tracking datasets without writing custom visualization scripts. It is designed for quick validation of dataset structure, annotation quality, and sequence-level consistency.
+MOTScope helps inspect MOT-style datasets without writing one-off visualization scripts. It is designed for quick validation of dataset structure, annotation quality, detection quality, sequence metadata, and tracking outputs.
 
-The viewer supports common MOT-style datasets such as SoccerNet-Tracking and DanceTrack, and can be easily extended to custom datasets through a configuration file or the web interface.
-
-
+The app runs locally with Flask and keeps user dataset configuration under `instance/`, so datasets can be registered without editing source code.
 
 ## Features
 
-- Browse MOT image sequences frame by frame  
-- Visualize multiple annotation layers with independent colors
-- Show GT, detections, tracker results, or custom MOT-style files together
-- Toggle layers, IDs, scores, and score thresholds in the browser
-- Use smooth video playback through a cached MP4 with canvas overlays
-- Export frames, image-sequence ZIPs, and MP4 videos
-- Use a light default theme with a persistent dark mode option
-- Trigger export downloads automatically, with a `Download again` fallback link
-- Switch between multiple datasets in the browser  
-- Register new datasets without modifying source code  
-- Configure dataset-specific layouts (splits, folders, filenames)  
-- Store local dataset configurations separately via `instance/`  
-
-
+- Browse image sequences frame by frame.
+- Display bounding boxes, IDs, visibility text, and detection scores.
+- Show ground truth and detections together with independent colors.
+- Support multiple annotation layers with layer visibility controls.
+- Switch datasets, splits, sequences, and annotation sources in the browser.
+- Register custom datasets from the UI or local JSON configuration.
+- Use smooth video playback through cached MP4 generation.
+- Export annotated or raw frames, image ZIPs, and MP4 videos.
+- Start export downloads automatically, with a `Download again` fallback link.
+- Use a light theme by default, with a persistent dark theme option.
+- Choose White Grid, Black Grid, Plain White, or Plain Black viewer backgrounds.
+- Zoom in and zoom out below fit size, with pan/drag controls.
+- Store local dataset configuration separately from source-controlled files.
 
 ## Supported Datasets
 
 | Dataset | Description | URL |
 | --- | --- | --- |
-| SoccerNet-Tracking | Soccer broadcast video dataset for multi-object tracking (SoccerNet challenge) | https://github.com/SoccerNet/sn-tracking |
-| DanceTrack | Multi-human tracking dataset with similar appearance and complex motion | https://dancetrack.github.io/ |
+| SoccerNet-Tracking | Soccer broadcast video dataset for multi-object tracking. | https://github.com/SoccerNet/sn-tracking |
+| DanceTrack | Multi-human tracking dataset with similar appearance and complex motion. | https://dancetrack.github.io/ |
+| SportsMOT | Multi-sport tracking benchmark with sports video sequences. | https://github.com/MCG-NJU/SportsMOT |
 
-Other MOT-style datasets can be added as long as their structure and annotations are compatible.
+Other MOT-style datasets can be added when their image folders and annotation files can be mapped to the expected structure.
 
+## Supported Dataset Structure
 
+Default MOT-style layout:
 
-## Installation
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/shijunjie07/mot-viewer.git
-cd mot-viewer
-````
-
-### 2. Create environment
-
-```bash
-conda create -n motviewer python=3.11 -y
-conda activate motviewer
+```text
+<dataset-root>/
+  <split>/
+    <sequence>/
+      img1/
+        000001.jpg
+        000002.jpg
+        ...
+      gt/
+        gt.txt
+      det/
+        det.txt
+      seqinfo.ini       # optional
+      gameinfo.ini      # optional
 ```
 
-### 3. Install dependencies
+Notes:
 
-```bash
-pip install -r requirements.txt
+- `img1/` is the default image directory.
+- `gt/` contains ground-truth annotation files.
+- `det/` may contain detection files such as `det.txt`.
+- `seqinfo.ini` and `gameinfo.ini` are optional.
+- Custom layouts can be registered through the dataset configuration.
+
+## Annotation Format
+
+MOTScope expects MOTChallenge-style comma-separated annotation rows:
+
+```text
+frame,id,x,y,w,h,confidence,class,unused,visibility
 ```
 
+Key fields used by the viewer:
 
+| Field | Description |
+| --- | --- |
+| `frame` | MOT frame number |
+| `id` | Object or track identity |
+| `x, y, w, h` | Bounding box position and size |
+| `confidence` | Detection score when available |
+| `visibility` | Optional visibility value used for review/highlighting |
 
-## Run
+Malformed annotation lines are skipped and reported as warnings instead of crashing the viewer.
 
-```bash
-python app.py
-```
-
-Open in browser:
-
-```
-http://127.0.0.1:5000
-```
-
-
-
-## Dataset Configuration
-
-By default, dataset definitions are stored in:
-
-```
-instance/datasets.json
-```
-
-This file is used for **local configuration only**.
-
-To override the path:
-
-```bash
-export MOT_VIEWER_DATASETS_CONFIG=/path/to/datasets.json
-```
-
-
-
-## Adding Custom Datasets
-
-### Option 1: Web UI
-
-Use **File -> Add Dataset...**. The dataset form opens as a modal dialog instead of occupying the navigation sidebar. Provide:
-
-* Dataset root path
-* Available splits
-* Optional folder / filename settings
-
-### Option 2: JSON Configuration
-
-Edit `instance/datasets.json` manually:
-
-```json
-{
-  "datasets": [
-    {
-      "name": "my_dataset",
-      "root": "/path/to/my_dataset",
-      "splits": ["train", "val", "test"],
-      "image_dir": "img1",
-      "gt_files": ["gt.txt"],
-      "seqinfo_filename": "seqinfo.ini",
-      "gameinfo_filename": "gameinfo.ini"
-    }
-  ]
-}
-```
-
-Datasets are loaded at startup, and changes from the UI are written back to this file.
-
-
-## Application Layout
-
-MOTScope uses a draw.io-style application layout:
-
-* top menu bar for high-level commands
-* File menu for Add Dataset, Export, config location, and refresh
-* compact top toolbar for playback mode, previous/play/stop/next, speed, theme toggle, and refresh
-* left sidebar for dataset navigation, Layers, Annotation Source, Display, and review jumps
-* central viewer workspace for frame canvas or smooth video playback
-* floating viewer controls for fit, zoom, pan, and rectangle zoom
-* right inspector reserved for selected box details and sequence metadata
-* modal dialogs for Add Dataset, Export, and long-running progress states
-
-The app opens in light mode by default. Use **View -> Theme: Dark** or the toolbar theme button to switch modes. The selected theme is stored in local browser storage.
-
-
-## Canvas Background
-
-MOTScope supports multiple viewer canvas backgrounds:
-
-- White Grid
-- Black Grid
-- Plain White
-- Plain Black
-
-The default is White Grid. The canvas background can be changed from **View -> Canvas Background**, the left Display section, or the floating **BG** control in the viewer. The setting is saved in the browser and is independent from the light/dark app theme.
-
-The image/video can be zoomed out below fit size, making the grid workspace visible around the sequence frame. Viewer zoom supports 10% to 800%, with **Fit** returning to fit-to-screen and **100%** showing original pixel scale when feasible.
-
-
-## Multiple Annotation Layers
+## Multi-Layer Annotations
 
 Existing configs that only define `gt_files` still work. To show GT and detections together, add `annotation_layers` to a dataset entry:
 
@@ -212,44 +125,45 @@ Existing configs that only define `gt_files` still work. To show GT and detectio
 }
 ```
 
-Layer paths are relative to each sequence folder, such as `<dataset-root>/<split>/<sequence>/gt/gt.txt`. If `annotation_layers` is omitted, the viewer derives a Ground Truth layer from `gt_files` and, when present, a Detections layer from `det/det.txt`.
+Layer paths are relative to each sequence folder, such as `<dataset-root>/<split>/<sequence>/gt/gt.txt`. If `annotation_layers` is omitted, MOTScope derives a Ground Truth layer from `gt_files` and, when present, a Detections layer from `det/det.txt`.
 
-Layer cards live in the left sidebar. Each card has a header with the layer color, name, type badge, and color swatch; a master **Show this layer** switch; display options for bounding boxes, IDs, and scores; and a per-layer score threshold.
+Layer cards live in the left sidebar. Each card has a color swatch, layer name, type badge, master **Show this layer** switch, display options, and score threshold.
 
-Click a layer swatch to edit color. The color picker previews immediately, stays open while you choose a color, supports manual hex values such as `#00ff00`, and offers Apply, Cancel, and Reset default actions.
+## Dataset Registration
 
+By default, dataset definitions are stored in:
 
-## Smooth Video Playback
+```text
+instance/datasets.json
+```
 
-The viewer has two playback modes:
+This file is local configuration and should not be committed.
 
-* **Frame Inspection Mode** keeps precise image-by-image navigation, stepping, zoom, hover, and locked-box inspection.
-* **Smooth Video Mode** generates a cached MP4 under `instance/video_cache/`, plays it in a `<video>` element, and draws selected annotation layers on a canvas overlay.
+To register a dataset from the UI, use **File -> Add Dataset...** and provide:
 
-Smooth playback requires `ffmpeg` on the system path. If `ffmpeg` is missing or video generation fails, the API returns a clear error and frame inspection remains usable.
+- dataset name
+- dataset root path
+- available splits
+- optional folder and filename settings
 
-Smooth videos are cached under `instance/video_cache/` with a sequence signature based on dataset, split, sequence, image directory, frame count, FPS, and first/last frame names. The viewer checks cached MP4 duration with `ffprobe`; stale or too-short cache files are regenerated.
+To use a different config path, set the legacy environment variable:
 
-The V3 UI keeps the V2 full-duration smooth-video fix and only changes the surrounding controls/progress behavior.
+```bash
+export MOT_VIEWER_DATASETS_CONFIG=/path/to/datasets.json
+```
 
-## Viewer Shortcuts
+## Smooth Playback
 
-| Shortcut | Action |
-| --- | --- |
-| Ctrl + mouse wheel | Zoom in/out around cursor |
-| Ctrl + + | Zoom in |
-| Ctrl + - | Zoom out |
-| Ctrl + 0 | Fit/reset view |
-| Shift + left drag | Pan/drag image |
+MOTScope has two playback modes:
 
+- **Frame Inspection** keeps precise image-by-image navigation, hover, locked-box inspection, zoom, and pan.
+- **Smooth Video** generates or reuses a cached MP4 under `instance/video_cache/`, plays it in a `<video>` element, and draws selected annotation layers on a synchronized canvas overlay.
 
-## Exporting
+Smooth playback requires `ffmpeg` on the system path. The video cache validates duration with `ffprobe`; stale or too-short cached files are regenerated.
 
-Use **File -> Export...**. The export workflow opens as a modal dialog where you choose a target, annotation mode, selected layers, and format. Generated files are written under `instance/exports/`, the browser download starts automatically after completion, and a `Download again` link remains available if the browser blocks the automatic download.
+## Export
 
-Smooth video generation and exports run through background jobs. The browser shows a progress modal with percentage and messages such as `Preparing frame 315 / 750`, `Rendering frame 450 / 750`, or `Encoding MP4`.
-
-Supported formats:
+Use **File -> Export...** to export:
 
 | Export Target | Formats |
 | --- | --- |
@@ -257,130 +171,99 @@ Supported formats:
 | Whole Sequence as Images ZIP | `jpg`, `jpeg`, `png`, `svg` |
 | Whole Sequence as Video | `mp4` |
 
-SVG exports embed the original frame image and draw boxes/text as real SVG elements.
+Exports can include no annotations, currently visible layers, or custom selected layers. Generated files are written under `instance/exports/`. The browser download starts automatically after completion, and a `Download again` link remains available.
 
+## Canvas Background and Zoom
 
-## Troubleshooting
+MOTScope supports different viewer canvas backgrounds, including White Grid, Black Grid, Plain White, and Plain Black. The default is White Grid. The canvas background is only used in the viewer workspace and does not modify the original image, video, or exported dataset files.
 
-### Smooth video only plays briefly
+The canvas background can be changed from **View -> Canvas Background**, the left Display section, or the floating **BG** control. The selected background is saved in the browser and is independent from the app light/dark theme.
 
-If smooth video only plays for a couple of seconds:
+Viewer zoom supports 10% to 800%. The image or video can be zoomed out below fit size, making the grid workspace visible around the sequence frame. **Fit** returns to fit-to-screen, and **100%** shows original pixel scale when feasible.
 
-1. Delete the relevant file under `instance/video_cache/`.
-2. Regenerate smooth video from the viewer.
-3. Check duration with:
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|---|---|
+| Ctrl + mouse wheel | Zoom in or out around the cursor |
+| Ctrl + + | Zoom in |
+| Ctrl + - | Zoom out |
+| Ctrl + 0 | Fit or reset view |
+| Shift + left drag | Pan the image or video |
+| Space + left drag | Pan, if enabled |
+
+## Installation
 
 ```bash
-ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 instance/video_cache/<video>.mp4
+git clone https://github.com/shijunjie07/MOTScope.git
+cd MOTScope
+conda create -n motviewer python=3.11 -y
+conda activate motviewer
+pip install -r requirements.txt
 ```
 
-4. Confirm expected duration is `frame_count / fps`.
-5. Confirm `seqinfo.ini` has the intended `frameRate`.
+For editable development:
 
-The V2 cache uses a signature and duration validation to avoid reusing stale short videos.
-
-### GT and detections do not appear together
-
-Confirm both layers are present in `annotation_layers` or that the sequence contains both `gt/gt.txt` and `det/det.txt`. In the left sidebar, layer visibility uses independent **Show this layer** switches, so multiple layers can stay enabled at the same time.
-
-
-
-## Expected Dataset Structure
-
-Default MOT-style layout:
-
-```
-<dataset-root>/
-  <split>/
-    <sequence>/
-      img1/
-        000001.jpg
-        000002.jpg
-        ...
-      gt/
-        gt.txt
-      seqinfo.ini       # optional
-      gameinfo.ini      # optional
+```bash
+pip install -e .
 ```
 
-### Notes
+## Running the App
 
-* `img1/` is the default image directory
-* `gt/` contains annotation files
-* `seqinfo.ini` and `gameinfo.ini` are optional
-* Ground-truth defaults to `gt.txt`
-* Custom layouts can be configured during dataset registration
-
-
-
-## Annotation Format
-
-Expected format follows MOTChallenge style:
-
-```
-frame,id,x,y,w,h,confidence,class,unused
+```bash
+python app.py
 ```
 
-Key fields used by the viewer:
+Open:
 
-| Field      | Description    |
-| ---------- | -------------- |
-| frame      | Frame index    |
-| id         | Track identity |
-| x, y, w, h | Bounding box   |
+```text
+http://127.0.0.1:5000
+```
 
+If port 5000 is busy:
 
-## Use Cases
+```bash
+PORT=5055 python app.py
+```
 
-* Validate tracking annotations before training
-* Check alignment between frames and labels
-* Compare annotation quality across datasets
-* Debug dataset conversion pipelines
+## Repository Structure
 
-
+```text
+app.py                         # local Flask entrypoint
+mot_viewer/                    # Flask package and MOTScope services
+  routes/                      # page and API routes
+  datasets/                    # dataset config models and registry
+  services/                    # viewer, annotation, video cache, export, jobs
+templates/index.html           # app shell
+static/app.js                  # frontend interaction logic
+static/style.css               # UI and viewer styling
+static/assets/                 # app logo and favicon assets
+docs/assets/                   # README and documentation images
+scripts/smoke_check.py         # smoke/regression checks
+instance/                      # local config/cache/export output, not committed
+```
 
 ## Roadmap
 
-Planned improvements:
-
-* [ ] Add support for more MOT datasets (e.g. MOT17, SportsMOT)
-* [ ] Improve UI for sequence navigation and playback
-* [ ] Add video export (annotated sequences)
-* [ ] Support additional annotation formats (e.g. COCO-style tracking)
-
+- Broaden dataset presets for more MOT benchmarks.
+- Add richer tracker-result comparison workflows.
+- Improve metadata and error reporting for large datasets.
+- Add more annotation format importers, such as COCO-style tracking.
+- Add optional browser-side review notes or issue markers.
 
 ## Contributing
 
 Contributions are welcome.
 
-1. Fork the repository
-2. Create a new branch (`feature/your-feature-name`)
-3. Make your changes
-4. Commit with clear messages
-5. Open a Pull Request
+1. Fork the repository.
+2. Create a feature branch.
+3. Make focused changes.
+4. Run `python -m compileall .` and `python scripts/smoke_check.py`.
+5. Commit with a clear message.
+6. Open a pull request.
 
-For major changes, please open an issue first to discuss your ideas.
-
-
-
-## Ideas & Feature Requests
-
-Feel free to open an issue for:
-
-* New dataset support
-* UI/UX improvements
-* Visualization features
-* Workflow integrations
-
-
-
-## Repository Notes
-
-* `instance/` is for local configuration and should not be committed
-* Documentation assets should be placed in `docs/assets/`
-
-
+For major changes, please open an issue first to discuss the design.
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.

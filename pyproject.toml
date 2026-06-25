@@ -3,9 +3,9 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mot-viewer"
+name = "MOTScope"
 version = "0.1.0"
-description = "A lightweight Flask-based MOT dataset viewer with pluggable dataset definitions."
+description = "A lightweight browser-based visual inspection tool for multi-object tracking datasets."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
