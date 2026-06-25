@@ -64,6 +64,16 @@ const exportFormat = document.getElementById("exportFormat");
 const exportLayerList = document.getElementById("exportLayerList");
 const exportBtn = document.getElementById("exportBtn");
 const exportStatus = document.getElementById("exportStatus");
+const openExportBtn = document.getElementById("openExportBtn");
+const openExportMenuBtn = document.getElementById("openExportMenuBtn");
+const exportModal = document.getElementById("exportModal");
+const exportCancelBtn = document.getElementById("exportCancelBtn");
+const progressModal = document.getElementById("progressModal");
+const progressTitle = document.getElementById("progressTitle");
+const progressFill = document.getElementById("progressFill");
+const progressPercent = document.getElementById("progressPercent");
+const progressMessage = document.getElementById("progressMessage");
+const progressCloseBtn = document.getElementById("progressCloseBtn");
 
 // Canvas
 const canvas = document.getElementById("frameCanvas");
@@ -84,6 +94,7 @@ let lockedBoxIndex = -1;
 // Playback state
 let isPlaying = false;
 let playbackIntervalId = null;
+let activeProgressJob = null;
 
 // Zoom and pan state
 let zoomLevel = 1.0; // 1.0 = 100%
@@ -248,7 +259,15 @@ function updateLayerState(name, patch) {
   layerState[name] = Object.assign({}, getLayerSettings(name), patch);
   refreshCurrentBoxes();
   populateExportLayers();
-  drawScene();
+  redrawActiveViewer();
+}
+
+function redrawActiveViewer() {
+  if (playbackModeSelect.value === "smooth") {
+    drawVideoOverlay();
+  } else {
+    drawScene();
+  }
 }
 
 function getParams() {
@@ -435,8 +454,9 @@ function updatePlaybackModeUI() {
   const smooth = playbackModeSelect.value === "smooth";
   videoStage.style.display = smooth ? "block" : "none";
   canvas.style.display = smooth ? "none" : "block";
-  document.querySelector(".zoomControlsOverlay").style.display = smooth ? "none" : "flex";
-  minimapOverlay.style.display = smooth ? "none" : minimapOverlay.style.display;
+  if (typeof minimapOverlay !== "undefined" && minimapOverlay) {
+    minimapOverlay.style.display = smooth ? "none" : minimapOverlay.style.display;
+  }
   if (smooth) {
     loadSmoothVideo().catch((e) => setStatus(`Video error: ${e.message}`));
   } else {
@@ -451,14 +471,16 @@ async function loadSmoothVideo() {
   const seq = seqSelect.value;
   if (!seq) throw new Error("No sequence selected");
   if (!annotationPayload) await loadAnnotationPayload();
-  const payload = await fetchJSON(
-    `/api/video/${encodeURIComponent(dataset)}/${encodeURIComponent(split)}/${encodeURIComponent(seq)}`
+  const payload = await runJobWithProgress(
+    "/api/video/render",
+    { dataset, split, sequence: seq },
+    "Generating Smooth Video"
   );
   videoInfo = payload;
   if (!payload.available) {
     throw new Error(payload.error || "video cache unavailable");
   }
-  if (!sequenceVideo.src.endsWith(payload.video_url)) {
+  if (!sequenceVideo.src.endsWith(payload.video_url || "")) {
     sequenceVideo.src = payload.video_url;
   }
   sequenceVideo.playbackRate = parseFloat(playbackSpeed.value) || 1;
@@ -472,7 +494,9 @@ async function startSmoothPlayback() {
     playBtn.disabled = true;
     stopBtn.disabled = false;
     await sequenceVideo.play();
-    drawVideoOverlayLoop();
+    if (videoAnimationId === null) {
+      drawVideoOverlayLoop();
+    }
   } catch (e) {
     setStatus(`Video error: ${e.message}`);
     stopPlayback();
@@ -481,8 +505,10 @@ async function startSmoothPlayback() {
 
 function drawVideoOverlayLoop() {
   drawVideoOverlay();
-  if (isPlaying || !sequenceVideo.paused) {
+  if (playbackModeSelect.value === "smooth" && !sequenceVideo.paused && !sequenceVideo.ended) {
     videoAnimationId = requestAnimationFrame(drawVideoOverlayLoop);
+  } else {
+    videoAnimationId = null;
   }
 }
 
@@ -496,7 +522,14 @@ function drawVideoOverlay() {
   if (!showGT.checked || !showBBox.checked) return;
   const fps = parseFloat(videoInfo.fps || annotationPayload.fps || 25);
   const firstFrame = parseInt(videoInfo.first_frame || annotationPayload.first_frame || 1, 10);
-  const frame = Math.floor(sequenceVideo.currentTime * fps) + firstFrame;
+  const lastFrame = parseInt(
+    videoInfo.last_frame || (firstFrame + (videoInfo.frame_count || annotationPayload.frame_count || 1) - 1),
+    10
+  );
+  const frame = Math.min(
+    lastFrame,
+    Math.max(firstFrame, Math.floor(sequenceVideo.currentTime * fps) + firstFrame)
+  );
   const boxes = flattenBoxesForFrame(frame);
   for (const b of boxes) {
     const rgb = hexToRgb(b.color || boxColor.value);
@@ -516,6 +549,53 @@ function drawVideoOverlay() {
       videoOverlayCtx.strokeText(labels.join(" "), x, y);
       videoOverlayCtx.fillText(labels.join(" "), x, y);
     }
+  }
+}
+
+function showProgressModal(title, message = "Starting") {
+  progressTitle.textContent = title;
+  progressCloseBtn.disabled = true;
+  progressFill.style.width = "0%";
+  progressPercent.textContent = "0%";
+  progressMessage.textContent = message;
+  progressModal.style.display = "flex";
+}
+
+function updateProgressModal(payload) {
+  const progress = Math.max(0, Math.min(100, parseInt(payload.progress || 0, 10)));
+  progressFill.style.width = `${progress}%`;
+  progressPercent.textContent = `${progress}%`;
+  progressMessage.textContent = payload.message || payload.status || "Working";
+}
+
+function hideProgressModalSoon() {
+  progressCloseBtn.disabled = false;
+  setTimeout(() => {
+    if (!activeProgressJob) {
+      progressModal.style.display = "none";
+    }
+  }, 450);
+}
+
+async function runJobWithProgress(url, payload, title) {
+  showProgressModal(title);
+  const start = await postJSON(url, payload);
+  activeProgressJob = start.job_id;
+  while (true) {
+    const job = await fetchJSON(`/api/jobs/${encodeURIComponent(activeProgressJob)}`);
+    updateProgressModal(job);
+    if (job.status === "done") {
+      activeProgressJob = null;
+      hideProgressModalSoon();
+      return job.result || {};
+    }
+    if (job.status === "failed") {
+      activeProgressJob = null;
+      progressCloseBtn.disabled = false;
+      progressMessage.textContent = job.error || "Job failed";
+      throw new Error(job.error || "Job failed");
+    }
+    await new Promise(resolve => setTimeout(resolve, 250));
   }
 }
 
@@ -1487,8 +1567,7 @@ function clearDatasetForm() {
 }
 
 function setDatasetFormOpen(isOpen) {
-  datasetFormPanel.style.display = isOpen ? "block" : "none";
-  toggleDatasetFormBtn.textContent = isOpen ? "Hide Dataset Form" : "Add Dataset";
+  datasetFormPanel.style.display = isOpen ? "flex" : "none";
   if (isOpen) {
     datasetNameInput.focus();
   }
@@ -1623,21 +1702,29 @@ async function runExport() {
     format: exportFormat.value,
     fps: annotationPayload ? annotationPayload.fps : 25,
   };
-  const endpoints = {
-    frame: "/api/export/frame",
-    images: "/api/export/sequence/images",
-    video: "/api/export/sequence/video",
-  };
   try {
     exportBtn.disabled = true;
     exportStatus.textContent = "Exporting...";
-    const result = await postJSON(endpoints[target], payload);
+    const result = await runJobWithProgress(
+      "/api/export/start",
+      Object.assign({ target }, payload),
+      target === "video" ? "Exporting Annotated Video" : "Exporting"
+    );
     if (!result.available) throw new Error(result.error || "Export unavailable");
     exportStatus.innerHTML = `<a class="exportLink" href="${result.download_url}">Download export</a>`;
   } catch (e) {
     exportStatus.textContent = `Export failed: ${e.message}`;
   } finally {
     exportBtn.disabled = false;
+  }
+}
+
+function setExportModalOpen(isOpen) {
+  exportModal.style.display = isOpen ? "flex" : "none";
+  if (isOpen) {
+    updateExportFormatOptions();
+    populateExportLayers();
+    exportStatus.textContent = "Choose an export target and format.";
   }
 }
 
@@ -1703,6 +1790,12 @@ datasetCancelBtn.addEventListener("click", () => {
   clearDatasetForm();
   datasetFormStatus.textContent = "Custom datasets are stored locally for future runs.";
   setDatasetFormOpen(false);
+});
+
+datasetFormPanel.addEventListener("click", (e) => {
+  if (e.target === datasetFormPanel) {
+    setDatasetFormOpen(false);
+  }
 });
 
 [datasetNameInput, datasetRootInput, datasetSplitsInput, datasetImageDirInput, datasetGtFilesInput, datasetSeqinfoInput, datasetGameinfoInput].forEach((el) => {
@@ -1789,13 +1882,13 @@ frameSlider.addEventListener("input", () => {
 
 // toggles redraw (no refetch)
 [showGT, showBBox, showID, showVis, highlightVis].forEach(el => {
-  el.addEventListener("change", () => drawScene());
+  el.addEventListener("change", () => redrawActiveViewer());
 });
 
-boxColor.addEventListener("change", () => drawScene());
-visColor.addEventListener("change", () => drawScene());
+boxColor.addEventListener("change", () => redrawActiveViewer());
+visColor.addEventListener("change", () => redrawActiveViewer());
 document.querySelectorAll('input[name="colorMode"]').forEach(el => {
-  el.addEventListener("change", () => drawScene());
+  el.addEventListener("change", () => redrawActiveViewer());
 });
 
 goBtn.addEventListener("click", () => {
@@ -1826,8 +1919,43 @@ stopBtn.addEventListener("click", stopPlayback);
 playbackSpeed.addEventListener("input", updatePlaybackSpeed);
 playbackSpeed.addEventListener("change", updatePlaybackSpeed);
 playbackModeSelect.addEventListener("change", updatePlaybackModeUI);
+sequenceVideo.addEventListener("loadedmetadata", () => {
+  drawVideoOverlay();
+});
+sequenceVideo.addEventListener("timeupdate", () => {
+  drawVideoOverlay();
+});
+sequenceVideo.addEventListener("play", () => {
+  if (playbackModeSelect.value === "smooth" && videoAnimationId === null) {
+    drawVideoOverlayLoop();
+  }
+});
+sequenceVideo.addEventListener("pause", () => {
+  isPlaying = false;
+  playBtn.disabled = false;
+  stopBtn.disabled = true;
+});
+sequenceVideo.addEventListener("ended", () => {
+  isPlaying = false;
+  playBtn.disabled = false;
+  stopBtn.disabled = true;
+  drawVideoOverlay();
+});
 exportTarget.addEventListener("change", updateExportFormatOptions);
 exportBtn.addEventListener("click", runExport);
+openExportBtn.addEventListener("click", () => setExportModalOpen(true));
+openExportMenuBtn.addEventListener("click", () => setExportModalOpen(true));
+exportCancelBtn.addEventListener("click", () => setExportModalOpen(false));
+progressCloseBtn.addEventListener("click", () => {
+  if (!activeProgressJob) {
+    progressModal.style.display = "none";
+  }
+});
+exportModal.addEventListener("click", (e) => {
+  if (e.target === exportModal) {
+    setExportModalOpen(false);
+  }
+});
 document.querySelectorAll('input[name="exportAnnotationMode"]').forEach(el => {
   el.addEventListener("change", populateExportLayers);
 });

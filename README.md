@@ -112,7 +112,7 @@ export MOT_VIEWER_DATASETS_CONFIG=/path/to/datasets.json
 
 ### Option 1: Web UI
 
-Use the **Add Dataset** button in the viewer and provide:
+Use the **Add Dataset** button in the top toolbar. The dataset form opens as a modal dialog instead of occupying the navigation sidebar. Provide:
 
 * Dataset root path
 * Available splits
@@ -139,6 +139,18 @@ Edit `instance/datasets.json` manually:
 ```
 
 Datasets are loaded at startup, and changes from the UI are written back to this file.
+
+
+## Application Layout
+
+The viewer uses a draw.io-style application layout:
+
+* top menu bar for high-level commands
+* top toolbar for common actions such as Add Dataset, Export, playback mode, playback controls, speed, zoom, and refresh
+* left sidebar for dataset, split, sequence, frame navigation, and review jumps
+* central viewer workspace for frame canvas or smooth video playback
+* right inspector for annotation layers, display properties, selected box details, and sequence metadata
+* modal dialogs for Add Dataset, Export, and long-running progress states
 
 
 ## Multiple Annotation Layers
@@ -188,10 +200,14 @@ The viewer has two playback modes:
 
 Smooth playback requires `ffmpeg` on the system path. If `ffmpeg` is missing or video generation fails, the API returns a clear error and frame inspection remains usable.
 
+Smooth videos are cached under `instance/video_cache/` with a sequence signature based on dataset, split, sequence, image directory, frame count, FPS, and first/last frame names. The viewer checks cached MP4 duration with `ffprobe`; stale or too-short cache files are regenerated.
+
 
 ## Exporting
 
-Use the Export panel to choose a target, annotation mode, selected layers, and format. Generated files are written under `instance/exports/` and returned as browser download links.
+Use the **Export** button in the top toolbar or menu bar. The export workflow opens as a modal dialog where you choose a target, annotation mode, selected layers, and format. Generated files are written under `instance/exports/` and returned as browser download links.
+
+Smooth video generation and exports run through background jobs. The browser shows a progress modal with percentage and messages such as `Preparing frame 315 / 750`, `Rendering frame 450 / 750`, or `Encoding MP4`.
 
 Supported formats:
 
@@ -202,6 +218,30 @@ Supported formats:
 | Whole Sequence as Video | `mp4` |
 
 SVG exports embed the original frame image and draw boxes/text as real SVG elements.
+
+
+## Troubleshooting
+
+### Smooth video only plays briefly
+
+If smooth video only plays for a couple of seconds:
+
+1. Delete the relevant file under `instance/video_cache/`.
+2. Regenerate smooth video from the viewer.
+3. Check duration with:
+
+```bash
+ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 instance/video_cache/<video>.mp4
+```
+
+4. Confirm expected duration is `frame_count / fps`.
+5. Confirm `seqinfo.ini` has the intended `frameRate`.
+
+The V2 cache uses a signature and duration validation to avoid reusing stale short videos.
+
+### GT and detections do not appear together
+
+Confirm both layers are present in `annotation_layers` or that the sequence contains both `gt/gt.txt` and `det/det.txt`. In the right inspector, layer visibility uses independent checkboxes, so multiple layers can stay enabled at the same time.
 
 
 

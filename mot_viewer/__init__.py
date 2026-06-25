@@ -13,6 +13,7 @@ from .datasets.registry import DatasetRegistry
 from .routes.api import api_bp
 from .routes.pages import pages_bp
 from .services.export_manager import ExportManager
+from .services.jobs import JobManager
 from .services.viewer import ViewerService
 from .services.video_cache import VideoCache
 
@@ -43,6 +44,7 @@ def create_app(config: type[AppConfig] = AppConfig) -> Flask:
     )
     viewer_service = ViewerService(registry)
     video_cache = VideoCache(viewer_service, Path(app.instance_path) / "video_cache")
+    job_manager = JobManager()
     export_manager = ExportManager(
         viewer_service,
         Path(app.instance_path) / "exports",
@@ -52,6 +54,7 @@ def create_app(config: type[AppConfig] = AppConfig) -> Flask:
     app.extensions["dataset_registry"] = registry
     app.extensions["viewer_service"] = viewer_service
     app.extensions["video_cache"] = video_cache
+    app.extensions["job_manager"] = job_manager
     app.extensions["export_manager"] = export_manager
 
     app.register_blueprint(pages_bp)

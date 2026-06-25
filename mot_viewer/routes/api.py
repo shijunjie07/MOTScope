@@ -32,9 +32,21 @@ def _export_manager():
     return current_app.extensions["export_manager"]
 
 
+def _job_manager():
+    """Return the shared background job manager."""
+    return current_app.extensions["job_manager"]
+
+
 def _download_url(path):
     """Build a browser download URL for an exported file path."""
     return f"/downloads/exports/{path.name}"
+
+
+def _public_video_payload(payload: dict) -> dict:
+    """Hide local filesystem details from video payloads."""
+    public_payload = dict(payload)
+    public_payload.pop("path", None)
+    return public_payload
 
 
 @api_bp.get("/datasets")
@@ -114,9 +126,37 @@ def api_annotations():
 def api_video(dataset: str, split: str, seq: str):
     """Create or return a cached MP4 proxy for smooth playback."""
     payload = _video_cache().ensure_video(dataset, split, seq)
-    public_payload = dict(payload)
-    public_payload.pop("path", None)
-    return jsonify(public_payload)
+    return jsonify(_public_video_payload(payload))
+
+
+@api_bp.post("/video/render")
+def api_video_render():
+    """Start a background smooth-video generation job."""
+    payload = request.get_json(silent=True) or {}
+    dataset = payload.get("dataset")
+    split = payload.get("split", "")
+    seq = payload.get("sequence") or payload.get("seq", "")
+    if not seq:
+        return jsonify({"error": "Missing sequence"}), 400
+    video_cache = _video_cache()
+
+    def work(progress):
+        result = video_cache.ensure_video(dataset, split, seq, progress=progress)
+        if not result.get("available"):
+            raise RuntimeError(result.get("error") or "video generation failed")
+        return _public_video_payload(result)
+
+    job = _job_manager().start("Generating Smooth Video", work)
+    return jsonify({"job_id": job.job_id, "status": job.status}), 202
+
+
+@api_bp.get("/jobs/<job_id>")
+def api_job(job_id: str):
+    """Return background job progress."""
+    job = _job_manager().get(job_id)
+    if job is None:
+        return jsonify({"error": "Job not found"}), 404
+    return jsonify(job.to_dict())
 
 
 @api_bp.get("/vis_not1_frames")
@@ -242,3 +282,30 @@ def api_export_sequence_video():
     except Exception as exc:
         return jsonify({"available": False, "error": f"video export failed: {exc}"}), 500
     return jsonify({"available": True, "download_url": _download_url(out_path)})
+
+
+@api_bp.post("/export/start")
+def api_export_start():
+    """Start an export job and report progress via /api/jobs/<job_id>."""
+    payload = request.get_json(silent=True) or {}
+    target = (payload.get("target") or "frame").strip().lower()
+    titles = {
+        "frame": "Exporting Frame",
+        "images": "Exporting Image Sequence",
+        "video": "Exporting Annotated Video",
+    }
+    if target not in titles:
+        return jsonify({"error": f"Unsupported export target: {target}"}), 400
+    export_manager = _export_manager()
+
+    def work(progress):
+        if target == "frame":
+            out_path = export_manager.export_frame(payload, progress=progress)
+        elif target == "images":
+            out_path = export_manager.export_images_zip(payload, progress=progress)
+        else:
+            out_path = export_manager.export_video(payload, progress=progress)
+        return {"available": True, "download_url": _download_url(out_path)}
+
+    job = _job_manager().start(titles[target], work)
+    return jsonify({"job_id": job.job_id, "status": job.status}), 202

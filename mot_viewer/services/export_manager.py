@@ -8,6 +8,7 @@ import tempfile
 import time
 import zipfile
 from pathlib import Path
+from typing import Callable
 
 import cv2
 
@@ -185,7 +186,9 @@ class ExportManager:
         )
         return annotation_payload, selected_layer_names(annotation_payload, payload)
 
-    def export_frame(self, payload: dict) -> Path:
+    def export_frame(self, payload: dict, progress: Callable[[int, str], None] | None = None) -> Path:
+        if progress:
+            progress(10, "Rendering frame")
         fmt = validate_export_request("frame", payload.get("format", "png"))
         annotation_payload, selected_layers = self._context(payload)
         frame_number = int(payload.get("frame", annotation_payload.get("first_frame", 1)))
@@ -202,6 +205,8 @@ class ExportManager:
         out_path = self._unique_path(filename)
         if fmt == "svg":
             out_path.write_bytes(render_svg(frame_path, boxes))
+            if progress:
+                progress(100, "Frame export ready")
             return out_path
         image = cv2.imread(str(frame_path), cv2.IMREAD_COLOR)
         if image is None:
@@ -209,9 +214,11 @@ class ExportManager:
         if selected_layers:
             draw_boxes(image, boxes)
         out_path.write_bytes(encode_raster(image, fmt))
+        if progress:
+            progress(100, "Frame export ready")
         return out_path
 
-    def export_images_zip(self, payload: dict) -> Path:
+    def export_images_zip(self, payload: dict, progress: Callable[[int, str], None] | None = None) -> Path:
         fmt = validate_export_request("images", payload.get("format", "png"))
         annotation_payload, selected_layers = self._context(payload)
         files = self.viewer.sequence_frame_files(
@@ -224,8 +231,9 @@ class ExportManager:
             f"{safe_name(payload.get('sequence'))}_images_{layer_key}_{fmt}.zip"
         )
         out_path = self._unique_path(filename)
+        total = len(files)
         with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for frame_path in files:
+            for idx, frame_path in enumerate(files, start=1):
                 frame_number = self.viewer.parse_frame_num_from_name(frame_path.name) or 1
                 boxes = boxes_for_frame(annotation_payload, frame_number, selected_layers)
                 arcname = f"{frame_path.stem}.{fmt}"
@@ -246,9 +254,11 @@ class ExportManager:
                         if image is None:
                             raise FileNotFoundError(f"Failed to read image: {frame_path}")
                         archive.writestr(arcname, encode_raster(image, fmt))
+                if progress and (idx == 1 or idx == total or idx % 25 == 0):
+                    progress(int((idx / total) * 100), f"Rendering frame {idx} / {total}")
         return out_path
 
-    def export_video(self, payload: dict) -> Path:
+    def export_video(self, payload: dict, progress: Callable[[int, str], None] | None = None) -> Path:
         validate_export_request("video", payload.get("format", "mp4"))
         annotation_payload, selected_layers = self._context(payload)
         self._ensure_dir()
@@ -260,14 +270,21 @@ class ExportManager:
         out_path = self._unique_path(filename)
         fps = float(payload.get("fps") or annotation_payload.get("fps") or 25)
         if not selected_layers:
-            cache = self.video_cache.ensure_video(payload.get("dataset"), payload.get("split", ""), payload.get("sequence", ""))
+            cache = self.video_cache.ensure_video(
+                payload.get("dataset"),
+                payload.get("split", ""),
+                payload.get("sequence", ""),
+                progress=progress,
+            )
             if cache.get("available") and cache.get("path"):
                 shutil.copyfile(cache["path"], out_path)
+                if progress:
+                    progress(100, "Video export ready")
                 return out_path
         files = self.viewer.sequence_frame_files(
             payload.get("dataset"), payload.get("split", ""), payload.get("sequence", "")
         )
-        self._encode_rendered_video(files, annotation_payload, selected_layers, fps, out_path)
+        self._encode_rendered_video(files, annotation_payload, selected_layers, fps, out_path, progress)
         return out_path
 
     def _encode_rendered_video(
@@ -277,12 +294,14 @@ class ExportManager:
         selected_layers: list[str],
         fps: float,
         out_path: Path,
+        progress: Callable[[int, str], None] | None = None,
     ) -> None:
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
             raise RuntimeError("ffmpeg not found")
         with tempfile.TemporaryDirectory() as tmp:
             tmp_dir = Path(tmp)
+            total = len(files)
             for idx, frame_path in enumerate(files, start=1):
                 image = cv2.imread(str(frame_path), cv2.IMREAD_COLOR)
                 if image is None:
@@ -292,6 +311,11 @@ class ExportManager:
                 if selected_layers:
                     draw_boxes(image, boxes)
                 cv2.imwrite(str(tmp_dir / f"{idx:06d}.jpg"), image)
+                if progress and (idx == 1 or idx == total or idx % 25 == 0):
+                    percent = max(1, min(85, int((idx / total) * 85)))
+                    progress(percent, f"Rendering frame {idx} / {total}")
+            if progress:
+                progress(90, "Encoding MP4")
             command = [
                 ffmpeg,
                 "-y",
@@ -310,6 +334,8 @@ class ExportManager:
             result = subprocess.run(command, capture_output=True, text=True, check=False)
             if result.returncode != 0:
                 raise RuntimeError(f"ffmpeg video export failed: {result.stderr.strip()}")
+            if progress:
+                progress(100, "Video export ready")
 
     def _unique_path(self, filename: str) -> Path:
         stem = Path(filename).stem

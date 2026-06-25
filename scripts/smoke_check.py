@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import tempfile
 from pathlib import Path
 
@@ -136,7 +137,24 @@ def main() -> None:
 
         response = client.get("/api/video/fixture/train/seq001")
         assert response.status_code == 200, response.get_data(as_text=True)
-        assert "available" in response.get_json()
+        video_payload = response.get_json()
+        assert "available" in video_payload
+        assert video_payload["available"] is True
+        assert video_payload["frame_count"] == 3
+        assert video_payload["expected_duration"] == 3 / 25
+        assert video_payload["duration"] >= 0.08
+        assert "signature" in video_payload
+
+        response = client.post(
+            "/api/video/render",
+            json={"dataset": "fixture", "split": "train", "sequence": "seq001"},
+        )
+        assert response.status_code == 202, response.get_data(as_text=True)
+        job_id = response.get_json()["job_id"]
+        video_job = wait_for_job(client, job_id)
+        assert video_job["status"] == "done", video_job
+        assert video_job["progress"] == 100
+        assert video_job["result"]["frame_count"] == 3
 
         for fmt in ["jpg", "jpeg", "png", "svg"]:
             response = client.post(
@@ -186,6 +204,25 @@ def main() -> None:
         assert response.status_code == 200, response.get_data(as_text=True)
         assert_download(client, response.get_json()["download_url"], "mp4")
 
+        response = client.post(
+            "/api/export/start",
+            json={
+                "target": "video",
+                "dataset": "fixture",
+                "split": "train",
+                "sequence": "seq001",
+                "include_annotations": True,
+                "annotation_mode": "custom",
+                "selected_layers": ["Ground Truth", "Detections"],
+                "format": "mp4",
+            },
+        )
+        assert response.status_code == 202, response.get_data(as_text=True)
+        export_job = wait_for_job(client, response.get_json()["job_id"])
+        assert export_job["status"] == "done", export_job
+        assert export_job["progress"] == 100
+        assert_download(client, export_job["result"]["download_url"], "mp4")
+
         invalid = client.post(
             "/api/export/frame",
             json={
@@ -200,6 +237,17 @@ def main() -> None:
 
     create_app()
     print("smoke_check passed")
+
+
+def wait_for_job(client, job_id: str) -> dict:
+    for _ in range(120):
+        response = client.get(f"/api/jobs/{job_id}")
+        assert response.status_code == 200, response.get_data(as_text=True)
+        payload = response.get_json()
+        if payload["status"] in {"done", "failed"}:
+            return payload
+        time.sleep(0.05)
+    raise AssertionError(f"job did not finish: {job_id}")
 
 
 if __name__ == "__main__":
