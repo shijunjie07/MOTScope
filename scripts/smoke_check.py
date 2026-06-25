@@ -147,6 +147,19 @@ def main() -> None:
         assert 'id="layerControls"' in html
         assert "Download again" in Path("static/app.js").read_text(encoding="utf-8")
         assert Path("docs/assets/motscope_logo_rect.png").exists()
+        assert 'data-canvas-bg="white-grid"' in html
+        assert 'id="canvasBackgroundSelect"' in html
+        assert 'id="canvasBgMenu"' in html
+
+        css = Path("static/style.css").read_text(encoding="utf-8")
+        for mode in ["white-grid", "black-grid", "plain-white", "plain-black"]:
+            assert f'[data-canvas-bg="{mode}"]' in css
+
+        js = Path("static/app.js").read_text(encoding="utf-8")
+        assert 'localStorage.setItem("motScopeCanvasBackground"' in js
+        assert "const MIN_ZOOM = 0.1" in js
+        assert "const MAX_ZOOM = 8.0" in js
+        assert "const ZOOM_STEP = 1.15" in js
 
         response = client.get("/api/annotations?dataset=fixture&split=train&seq=seq001")
         assert response.status_code == 200, response.get_data(as_text=True)

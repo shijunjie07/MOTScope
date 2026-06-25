@@ -3,6 +3,11 @@ const fileMenuBtn = document.getElementById("fileMenuBtn");
 const fileMenuDropdown = document.getElementById("fileMenuDropdown");
 const viewMenuBtn = document.getElementById("viewMenuBtn");
 const viewMenuDropdown = document.getElementById("viewMenuDropdown");
+const viewerWorkspace = document.querySelector(".viewer-workspace");
+const canvasBackgroundSelect = document.getElementById("canvasBackgroundSelect");
+const canvasBgMenuBtn = document.getElementById("canvasBgMenuBtn");
+const canvasBgMenu = document.getElementById("canvasBgMenu");
+const viewerStage = document.querySelector(".viewer-stage");
 const themeLightBtn = document.getElementById("themeLightBtn");
 const themeDarkBtn = document.getElementById("themeDarkBtn");
 const themeToggleBtn = document.getElementById("themeToggleBtn");
@@ -64,6 +69,7 @@ const zoomResetBtn = document.getElementById("zoomResetBtn");
 const zoomHint = document.getElementById("zoomHint");
 const zoomReadout = document.getElementById("zoomReadout");
 const zoomResetFloatingBtn = document.getElementById("zoomResetFloatingBtn");
+const zoomActualBtn = document.getElementById("zoomActualBtn");
 const minimapCanvas = document.getElementById("minimapCanvas");
 const minimapRect = document.getElementById("minimapRect");
 const videoStage = document.getElementById("videoStage");
@@ -134,6 +140,11 @@ let isRectSelecting = false;
 
 const EPS_VIS = 1e-6;
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+const CANVAS_BACKGROUND_KEY = "motScopeCanvasBackground";
+const CANVAS_BACKGROUND_MODES = new Set(["white-grid", "black-grid", "plain-white", "plain-black"]);
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 8.0;
+const ZOOM_STEP = 1.15;
 
 // text size
 const ID_FONT_PX = 18;
@@ -188,6 +199,8 @@ function closeMenus() {
     button.classList.remove("active");
     button.setAttribute("aria-expanded", "false");
   }
+  if (canvasBgMenu) canvasBgMenu.hidden = true;
+  if (canvasBgMenuBtn) canvasBgMenuBtn.classList.remove("active");
 }
 
 function toggleMenu(button, menu) {
@@ -211,6 +224,43 @@ function applyTheme(theme) {
 
 function initTheme() {
   applyTheme(localStorage.getItem("motscope-theme") || "light");
+}
+
+function applyCanvasBackground(value) {
+  const next = CANVAS_BACKGROUND_MODES.has(value) ? value : "white-grid";
+  viewerWorkspace.dataset.canvasBg = next;
+  if (canvasBackgroundSelect) canvasBackgroundSelect.value = next;
+  localStorage.setItem("motScopeCanvasBackground", next);
+  for (const button of document.querySelectorAll(".canvasBgOption")) {
+    button.classList.toggle("active", button.dataset.canvasBg === next);
+  }
+}
+
+function initCanvasBackground() {
+  applyCanvasBackground(localStorage.getItem(CANVAS_BACKGROUND_KEY) || "white-grid");
+}
+
+function updateZoomText() {
+  const label = `${Math.round(zoomLevel * 100)}%`;
+  zoomInput.value = Math.round(zoomLevel * 100);
+  zoomHint.textContent = label;
+  if (zoomReadout) zoomReadout.textContent = label;
+}
+
+function activeDisplayScale() {
+  if (playbackModeSelect.value === "smooth" && videoStage && sequenceVideo.videoWidth) {
+    const rect = videoStage.getBoundingClientRect();
+    const unscaledWidth = zoomLevel > 0 ? rect.width / zoomLevel : rect.width;
+    return unscaledWidth > 0 ? sequenceVideo.videoWidth / unscaledWidth : 1;
+  }
+  if (!canvas.width) return 1;
+  const rect = canvas.getBoundingClientRect();
+  return rect.width > 0 ? canvas.width / rect.width : 1;
+}
+
+function applyVideoViewport() {
+  if (!videoStage) return;
+  videoStage.style.transform = `scale(${zoomLevel})`;
 }
 
 function isValidHexColor(value) {
@@ -596,8 +646,10 @@ function updatePlaybackModeUI() {
     minimapOverlay.style.display = smooth ? "none" : minimapOverlay.style.display;
   }
   if (smooth) {
+    applyVideoViewport();
     loadSmoothVideo().catch((e) => setStatus(`Video error: ${e.message}`));
   } else {
+    applyVideoViewport();
     stopPlayback();
     loadFrameImageAndBoxes();
   }
@@ -785,6 +837,12 @@ function clampPan() {
   const halfViewW = canvas.width / (2 * zoomLevel);
   const halfViewH = canvas.height / (2 * zoomLevel);
 
+  if (zoomLevel < 1.0) {
+    panX = Math.max(-halfViewW, Math.min(imgW + halfViewW, panX));
+    panY = Math.max(-halfViewH, Math.min(imgH + halfViewH, panY));
+    return;
+  }
+
   if (imgW <= 2 * halfViewW) {
     panX = imgW / 2;
   } else {
@@ -800,13 +858,12 @@ function clampPan() {
 
 function setZoomLevel(newZoom, anchorCanvasX = canvas.width / 2, anchorCanvasY = canvas.height / 2) {
   const oldZoom = zoomLevel;
-  const clampedZoom = Math.max(1.0, Math.min(4.0, newZoom));
+  const clampedZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
 
   if (!currentImage) {
     zoomLevel = clampedZoom;
-    zoomInput.value = Math.round(zoomLevel * 100);
-    zoomHint.textContent = `${Math.round(zoomLevel * 100)}%`;
-    if (zoomReadout) zoomReadout.textContent = `${Math.round(zoomLevel * 100)}%`;
+    updateZoomText();
+    applyVideoViewport();
     return;
   }
 
@@ -821,16 +878,15 @@ function setZoomLevel(newZoom, anchorCanvasX = canvas.width / 2, anchorCanvasY =
   panY = imageY - (anchorCanvasY - centerY) / zoomLevel;
   clampPan();
 
-  zoomInput.value = Math.round(zoomLevel * 100);
-  zoomHint.textContent = `${Math.round(zoomLevel * 100)}%`;
-  if (zoomReadout) zoomReadout.textContent = `${Math.round(zoomLevel * 100)}%`;
+  updateZoomText();
 }
 
 function applyZoom() {
   const val = parseInt(zoomInput.value || "100", 10);
-  const percent = Math.max(10, Math.min(400, val));
+  const percent = Math.max(MIN_ZOOM * 100, Math.min(MAX_ZOOM * 100, val));
   setZoomLevel(percent / 100);
-  drawScene();
+  applyVideoViewport();
+  redrawActiveViewer();
   updateMinimap();
   updateMinimapVisibility();
 }
@@ -840,10 +896,17 @@ function resetZoom() {
   const center = getImageCenter();
   panX = center.x;
   panY = center.y;
-  zoomInput.value = 100;
-  zoomHint.textContent = "100%";
-  if (zoomReadout) zoomReadout.textContent = "100%";
-  drawScene();
+  updateZoomText();
+  applyVideoViewport();
+  redrawActiveViewer();
+  updateMinimap();
+  updateMinimapVisibility();
+}
+
+function zoomActualSize() {
+  setZoomLevel(activeDisplayScale());
+  applyVideoViewport();
+  redrawActiveViewer();
   updateMinimap();
   updateMinimapVisibility();
 }
@@ -860,9 +923,22 @@ function canvasPointFromEvent(e) {
 
 function zoomByFactor(factor, anchorX = canvas.width / 2, anchorY = canvas.height / 2) {
   setZoomLevel(zoomLevel * factor, anchorX, anchorY);
-  drawScene();
+  applyVideoViewport();
+  redrawActiveViewer();
   updateMinimap();
   updateMinimapVisibility();
+}
+
+function handleViewerWheel(e) {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+  if (playbackModeSelect.value === "frame" && e.target === canvas) {
+    const point = canvasPointFromEvent(e);
+    zoomByFactor(factor, point.x, point.y);
+    return;
+  }
+  zoomByFactor(factor);
 }
 
 // ---- minimap ----
@@ -1347,7 +1423,6 @@ canvas.addEventListener("mousedown", (e) => {
   if (e.button !== 0) return;
   // Handle different modes
   if (e.shiftKey || e.code === "Space" || zoomMode === "pan") {
-    if (zoomLevel <= 1) return; // Only pan when zoomed
     isDragging = true;
     dragStartX = e.clientX;
     dragStartY = e.clientY;
@@ -1357,7 +1432,7 @@ canvas.addEventListener("mousedown", (e) => {
     const sy = canvas.height / rect.height;
     const canvasX = (e.clientX - rect.left) * sx;
     const canvasY = (e.clientY - rect.top) * sy;
-    setZoomLevel(zoomLevel * 1.1, canvasX, canvasY);
+    setZoomLevel(zoomLevel * ZOOM_STEP, canvasX, canvasY);
     drawScene();
     updateMinimap();
     updateMinimapVisibility();
@@ -1367,7 +1442,7 @@ canvas.addEventListener("mousedown", (e) => {
     const sy = canvas.height / rect.height;
     const canvasX = (e.clientX - rect.left) * sx;
     const canvasY = (e.clientY - rect.top) * sy;
-    setZoomLevel(zoomLevel / 1.1, canvasX, canvasY);
+    setZoomLevel(zoomLevel / ZOOM_STEP, canvasX, canvasY);
     drawScene();
     updateMinimap();
     updateMinimapVisibility();
@@ -1473,7 +1548,7 @@ canvas.addEventListener("mouseup", (e) => {
     if (pw > 10 && ph > 10) {
       const desiredZoomX = canvas.width / pw;
       const desiredZoomY = canvas.height / ph;
-      const newZoom = Math.min(4.0, Math.max(1.0, Math.min(desiredZoomX, desiredZoomY)));
+      const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(desiredZoomX, desiredZoomY)));
       const centerPx_x = (px_min + px_max) / 2;
       const centerPx_y = (py_min + py_max) / 2;
 
@@ -1481,8 +1556,7 @@ canvas.addEventListener("mouseup", (e) => {
       panX = centerPx_x;
       panY = centerPx_y;
       clampPan();
-      zoomInput.value = Math.round(zoomLevel * 100);
-      zoomHint.textContent = Math.round(zoomLevel * 100) + "%";
+      updateZoomText();
       drawScene();
       updateMinimap();
       updateMinimapVisibility();
@@ -1496,12 +1570,7 @@ canvas.addEventListener("mouseleave", () => {
   isDragging = false;
 });
 
-canvas.addEventListener("wheel", (e) => {
-  if (!e.ctrlKey) return;
-  e.preventDefault();
-  const point = canvasPointFromEvent(e);
-  zoomByFactor(e.deltaY < 0 ? 1.12 : 1 / 1.12, point.x, point.y);
-}, { passive: false });
+viewerStage.addEventListener("wheel", handleViewerWheel, { passive: false });
 
 // ---- load image + boxes ----
 let renderAbort = null;
@@ -1987,7 +2056,6 @@ fileMenuDropdown.addEventListener("click", (e) => {
 
 viewMenuDropdown.addEventListener("click", (e) => {
   e.stopPropagation();
-  closeMenus();
 });
 
 themeLightBtn.addEventListener("click", () => applyTheme("light"));
@@ -2000,6 +2068,28 @@ themeToggleBtn.addEventListener("click", () => {
 refreshMenuBtn.addEventListener("click", refreshAll);
 openConfigFolderBtn.addEventListener("click", () => {
   setStatus("Config folder: instance/datasets.json");
+});
+
+canvasBackgroundSelect.addEventListener("change", (e) => {
+  applyCanvasBackground(e.target.value);
+});
+
+canvasBgMenuBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  canvasBgMenu.hidden = !canvasBgMenu.hidden;
+  canvasBgMenuBtn.classList.toggle("active", !canvasBgMenu.hidden);
+});
+
+canvasBgMenu.addEventListener("click", (e) => {
+  e.stopPropagation();
+});
+
+document.querySelectorAll(".canvasBgOption").forEach((button) => {
+  button.addEventListener("click", () => {
+    applyCanvasBackground(button.dataset.canvasBg);
+    canvasBgMenu.hidden = true;
+    canvasBgMenuBtn.classList.remove("active");
+  });
 });
 
 datasetSelect.addEventListener("change", () => {
@@ -2150,6 +2240,7 @@ playbackSpeed.addEventListener("input", updatePlaybackSpeed);
 playbackSpeed.addEventListener("change", updatePlaybackSpeed);
 playbackModeSelect.addEventListener("change", updatePlaybackModeUI);
 sequenceVideo.addEventListener("loadedmetadata", () => {
+  applyVideoViewport();
   drawVideoOverlay();
 });
 sequenceVideo.addEventListener("timeupdate", () => {
@@ -2225,6 +2316,7 @@ document.querySelectorAll('input[name="exportAnnotationMode"]').forEach(el => {
 zoomInput.addEventListener("input", applyZoom);
 zoomResetBtn.addEventListener("click", resetZoom);
 zoomResetFloatingBtn.addEventListener("click", resetZoom);
+zoomActualBtn.addEventListener("click", zoomActualSize);
 
 // ---- Zoom control buttons ----
 const zoomInBtn = document.getElementById("zoomInBtn");
@@ -2246,12 +2338,12 @@ function updateZoomButtonsUI() {
 }
 
 zoomInBtn.addEventListener("click", () => {
-  zoomByFactor(1.15);
+  zoomByFactor(ZOOM_STEP);
   updateZoomButtonsUI();
 });
 
 zoomOutBtn.addEventListener("click", () => {
-  zoomByFactor(1 / 1.15);
+  zoomByFactor(1 / ZOOM_STEP);
   updateZoomButtonsUI();
 });
 
@@ -2364,12 +2456,12 @@ document.addEventListener("keydown", (e) => {
   if (e.ctrlKey || e.metaKey) {
     if (e.key === "+" || e.key === "=") {
       e.preventDefault();
-      zoomByFactor(1.15);
+      zoomByFactor(ZOOM_STEP);
       return;
     }
     if (e.key === "-") {
       e.preventDefault();
-      zoomByFactor(1 / 1.15);
+      zoomByFactor(1 / ZOOM_STEP);
       return;
     }
     if (e.key === "0") {
@@ -2387,6 +2479,7 @@ document.addEventListener("keydown", (e) => {
 (async function init() {
   try {
     initTheme();
+    initCanvasBackground();
     await loadDatasets();
     updateExportFormatOptions();
     updatePlaybackSpeed();

@@ -31,6 +31,12 @@
           <div id="viewMenuDropdown" class="menuDropdown" role="menu" hidden>
             <button id="themeLightBtn" type="button" role="menuitem">Theme: Light</button>
             <button id="themeDarkBtn" type="button" role="menuitem">Theme: Dark</button>
+            <div class="menuDivider"></div>
+            <div class="menuLabel">Canvas Background</div>
+            <button class="canvasBgOption" type="button" role="menuitem" data-canvas-bg="white-grid">White Grid</button>
+            <button class="canvasBgOption" type="button" role="menuitem" data-canvas-bg="black-grid">Black Grid</button>
+            <button class="canvasBgOption" type="button" role="menuitem" data-canvas-bg="plain-white">Plain White</button>
+            <button class="canvasBgOption" type="button" role="menuitem" data-canvas-bg="plain-black">Plain Black</button>
           </div>
         </div>
         <button type="button">Export</button>
@@ -125,10 +131,17 @@
           <input type="color" id="boxColor" value="#3b82f6" />
           <label>Visibility color</label>
           <input type="color" id="visColor" value="#ef4444" />
+          <label>Canvas background</label>
+          <select id="canvasBackgroundSelect">
+            <option value="white-grid">White Grid</option>
+            <option value="black-grid">Black Grid</option>
+            <option value="plain-white">Plain White</option>
+            <option value="plain-black">Plain Black</option>
+          </select>
           <label class="check"><input type="radio" name="colorMode" value="fixed" checked /> Fixed</label>
           <label class="check"><input type="radio" name="colorMode" value="by_vis" /> By visibility</label>
           <div class="row">
-            <input id="zoomInput" type="number" min="10" max="400" value="100" />
+            <input id="zoomInput" type="number" min="10" max="800" value="100" />
             <button id="zoomResetBtn" class="compactBtn">Reset</button>
           </div>
           <div class="hint" id="zoomHint">100%</div>
@@ -142,7 +155,7 @@
         </section>
       </aside>
 
-      <main class="viewer-workspace">
+      <main class="viewer-workspace" data-canvas-bg="white-grid">
         <div class="viewer-stage">
           <div id="videoStage" class="videoStage" style="display: none;">
             <video id="sequenceVideo" playsinline muted controls></video>
@@ -158,11 +171,21 @@
           </div>
           <div class="viewerControls" aria-label="Viewer controls">
             <button id="zoomResetFloatingBtn" class="viewerControlBtn" type="button" title="Fit view">Fit</button>
+            <button id="zoomActualBtn" class="viewerControlBtn" type="button" title="100% actual size">100%</button>
             <span id="zoomReadout" class="viewerZoomReadout">100%</span>
-            <button id="zoomInBtn" class="viewerControlBtn" type="button" title="Zoom in">+</button>
             <button id="zoomOutBtn" class="viewerControlBtn" type="button" title="Zoom out">-</button>
+            <button id="zoomInBtn" class="viewerControlBtn" type="button" title="Zoom in">+</button>
             <button id="panBtn" class="viewerControlBtn" type="button" title="Pan mode">Pan</button>
             <button id="rectZoomBtn" class="viewerControlBtn" type="button" title="Rectangle zoom">Rect</button>
+            <div class="viewerBgRoot">
+              <button id="canvasBgMenuBtn" class="viewerControlBtn" type="button" title="Canvas background">BG</button>
+              <div id="canvasBgMenu" class="viewerBgMenu" hidden>
+                <button class="canvasBgOption" type="button" data-canvas-bg="white-grid">White Grid</button>
+                <button class="canvasBgOption" type="button" data-canvas-bg="black-grid">Black Grid</button>
+                <button class="canvasBgOption" type="button" data-canvas-bg="plain-white">Plain White</button>
+                <button class="canvasBgOption" type="button" data-canvas-bg="plain-black">Plain Black</button>
+              </div>
+            </div>
           </div>
         </div>
 

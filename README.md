@@ -163,6 +163,20 @@ MOTScope uses a draw.io-style application layout:
 The app opens in light mode by default. Use **View -> Theme: Dark** or the toolbar theme button to switch modes. The selected theme is stored in local browser storage.
 
 
+## Canvas Background
+
+MOTScope supports multiple viewer canvas backgrounds:
+
+- White Grid
+- Black Grid
+- Plain White
+- Plain Black
+
+The default is White Grid. The canvas background can be changed from **View -> Canvas Background**, the left Display section, or the floating **BG** control in the viewer. The setting is saved in the browser and is independent from the light/dark app theme.
+
+The image/video can be zoomed out below fit size, making the grid workspace visible around the sequence frame. Viewer zoom supports 10% to 800%, with **Fit** returning to fit-to-screen and **100%** showing original pixel scale when feasible.
+
+
 ## Multiple Annotation Layers
 
 Existing configs that only define `gt_files` still work. To show GT and detections together, add `annotation_layers` to a dataset entry:
@@ -222,7 +236,7 @@ The V3 UI keeps the V2 full-duration smooth-video fix and only changes the surro
 
 | Shortcut | Action |
 | --- | --- |
-| Ctrl + mouse wheel | Zoom around cursor |
+| Ctrl + mouse wheel | Zoom in/out around cursor |
 | Ctrl + + | Zoom in |
 | Ctrl + - | Zoom out |
 | Ctrl + 0 | Fit/reset view |

@@ -152,6 +152,20 @@ body {
   border-radius: 6px;
 }
 
+.menuDivider {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--border-main);
+}
+
+.menuLabel {
+  padding: 5px 10px 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
 .toolBtn {
   padding: 7px 12px;
   width: auto;
@@ -345,7 +359,37 @@ input[type="range"] {
   min-height: 0;
   display: grid;
   grid-template-rows: minmax(0, 1fr) 44px;
-  background: var(--bg-viewer);
+  background-color: #f8fafc;
+  background-image:
+    linear-gradient(to right, rgba(15, 23, 42, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.viewer-workspace[data-canvas-bg="white-grid"] {
+  background-color: #f8fafc;
+  background-image:
+    linear-gradient(to right, rgba(15, 23, 42, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.viewer-workspace[data-canvas-bg="black-grid"] {
+  background-color: #020617;
+  background-image:
+    linear-gradient(to right, rgba(148, 163, 184, 0.16) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.16) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.viewer-workspace[data-canvas-bg="plain-white"] {
+  background-color: #ffffff;
+  background-image: none;
+}
+
+.viewer-workspace[data-canvas-bg="plain-black"] {
+  background-color: #020617;
+  background-image: none;
 }
 
 .viewer-stage {
@@ -356,12 +400,7 @@ input[type="range"] {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background:
-    linear-gradient(45deg, color-mix(in srgb, var(--bg-viewer-deep) 85%, #fff) 25%, transparent 25%),
-    linear-gradient(-45deg, color-mix(in srgb, var(--bg-viewer-deep) 85%, #fff) 25%, transparent 25%),
-    var(--bg-viewer);
-  background-size: 28px 28px;
-  background-position: 0 0, 0 14px;
+  background: transparent;
 }
 
 #frameCanvas,
@@ -369,7 +408,7 @@ input[type="range"] {
   max-width: 100%;
   max-height: 100%;
   border: 1px solid var(--border-strong);
-  background: #05070a;
+  background: transparent;
   box-sizing: border-box;
   box-shadow: 0 18px 38px rgba(15, 23, 42, 0.18);
 }
@@ -385,6 +424,8 @@ input[type="range"] {
 .videoStage {
   position: relative;
   overflow: hidden;
+  transform-origin: center center;
+  will-change: transform;
 }
 
 #sequenceVideo,
@@ -415,6 +456,31 @@ input[type="range"] {
   background: color-mix(in srgb, var(--bg-panel) 92%, transparent);
   box-shadow: var(--shadow-soft);
   z-index: 30;
+}
+
+.viewerBgRoot {
+  position: relative;
+}
+
+.viewerBgMenu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  min-width: 138px;
+  padding: 6px;
+  border: 1px solid var(--border-main);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-soft);
+}
+
+.viewerBgMenu button {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  border-color: transparent;
+  text-align: left;
+  border-radius: 6px;
 }
 
 .viewerControlBtn {
