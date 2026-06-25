@@ -24,6 +24,9 @@ dist/
 .codex
 instance/
 
+# Local planning notes
+PLAN_*.md*
+
 # OS files
 .DS_Store
 Thumbs.db
