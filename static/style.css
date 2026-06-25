@@ -134,6 +134,71 @@ input[type="range"] {
   line-height: 1.35;
 }
 
+.layerControls,
+.exportLayerList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.layerItem {
+  border: 1px solid #2a2f3a;
+  border-radius: 8px;
+  background: #0f1115;
+  padding: 8px;
+}
+
+.layerHeader {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.layerSwatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.45);
+}
+
+.layerName {
+  font-size: 13px;
+  color: #e8e8e8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layerOptions {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 8px;
+}
+
+.layerOptions label {
+  margin: 0;
+}
+
+.layerOptions input[type="range"] {
+  grid-column: 1 / -1;
+}
+
+.exportPanel {
+  border-top: 1px solid #2a2f3a;
+  padding-top: 14px;
+}
+
+.exportLayerList {
+  margin: 8px 0;
+}
+
+.exportLink {
+  color: #7cc7ff;
+  word-break: break-all;
+}
+
 .row {
   display: flex;
   gap: 8px;
@@ -238,6 +303,31 @@ input[type="range"] {
   background: #0b0d12;
   cursor: grab;
   position: relative;
+}
+
+.videoStage {
+  position: relative;
+  max-width: 100%;
+  max-height: calc(100vh - 46px - 24px - 48px - 12px);
+  background: #0b0d12;
+  border: 1px solid #2a2f3a;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+#sequenceVideo,
+#videoOverlayCanvas {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 46px - 24px - 48px - 12px);
+}
+
+#videoOverlayCanvas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  width: 100%;
+  height: 100%;
 }
 
 /* Zoom controls overlay on top of canvas */

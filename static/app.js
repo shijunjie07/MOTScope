@@ -16,6 +16,8 @@ const seqSelect = document.getElementById("seqSelect");
 const annotationTypeSelect = document.getElementById("annotationTypeSelect");
 const annotationFileSelect = document.getElementById("annotationFileSelect");
 const annotationHint = document.getElementById("annotationHint");
+const layerControls = document.getElementById("layerControls");
+const layerWarnings = document.getElementById("layerWarnings");
 const frameSlider = document.getElementById("frameSlider");
 const frameHint = document.getElementById("frameHint");
 
@@ -39,6 +41,7 @@ const prevBtn = document.getElementById("prevBtn");
 const nextBtn = document.getElementById("nextBtn");
 const playBtn = document.getElementById("playBtn");
 const stopBtn = document.getElementById("stopBtn");
+const playbackModeSelect = document.getElementById("playbackModeSelect");
 const playbackSpeed = document.getElementById("playbackSpeed");
 const speedHint = document.getElementById("speedHint");
 const viewerInfo = document.getElementById("viewerInfo");
@@ -52,6 +55,15 @@ const zoomResetBtn = document.getElementById("zoomResetBtn");
 const zoomHint = document.getElementById("zoomHint");
 const minimapCanvas = document.getElementById("minimapCanvas");
 const minimapRect = document.getElementById("minimapRect");
+const videoStage = document.getElementById("videoStage");
+const sequenceVideo = document.getElementById("sequenceVideo");
+const videoOverlayCanvas = document.getElementById("videoOverlayCanvas");
+const videoOverlayCtx = videoOverlayCanvas.getContext("2d");
+const exportTarget = document.getElementById("exportTarget");
+const exportFormat = document.getElementById("exportFormat");
+const exportLayerList = document.getElementById("exportLayerList");
+const exportBtn = document.getElementById("exportBtn");
+const exportStatus = document.getElementById("exportStatus");
 
 // Canvas
 const canvas = document.getElementById("frameCanvas");
@@ -62,6 +74,10 @@ let lastFrameInfo = null;
 let currentImage = null;
 let currentBoxes = [];
 let currentMotFrame = null;
+let annotationPayload = null;
+let layerState = {};
+let videoInfo = null;
+let videoAnimationId = null;
 let hoveredIndex = -1;
 let lockedBoxIndex = -1;
 
@@ -126,6 +142,11 @@ function getRadio(name, fallback) {
   return el ? el.value : fallback;
 }
 
+function setRadio(name, value) {
+  const el = document.querySelector(`input[name="${name}"][value="${value}"]`);
+  if (el) el.checked = true;
+}
+
 function throttle(fn, waitMs) {
   let last = 0;
   let timer = null;
@@ -166,6 +187,70 @@ function visIsNot1(vis) {
   return typeof vis === "number" && vis >= 0 && Math.abs(vis - 1.0) > EPS_VIS;
 }
 
+function layerKey(name) {
+  return String(name || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function getLayerSettings(name) {
+  const payloadLayer = annotationPayload && annotationPayload.layers
+    ? annotationPayload.layers.find(layer => layer.name === name)
+    : null;
+  return Object.assign({}, payloadLayer || {}, layerState[name] || {});
+}
+
+function visibleLayerNames() {
+  if (!annotationPayload || !annotationPayload.layers) return [];
+  return annotationPayload.layers
+    .map(layer => getLayerSettings(layer.name))
+    .filter(layer => layer.visible !== false)
+    .map(layer => layer.name);
+}
+
+function flattenBoxesForFrame(motFrame) {
+  if (!annotationPayload || motFrame === null || motFrame === undefined) return [];
+  const frameLayers = (annotationPayload.frames || {})[String(motFrame)] || {};
+  const out = [];
+  for (const name of visibleLayerNames()) {
+    const settings = getLayerSettings(name);
+    const threshold = parseFloat(settings.score_threshold || 0) || 0;
+    for (const box of (frameLayers[name] || [])) {
+      const score = typeof box.score === "number" ? box.score : parseFloat(box.score || "1");
+      if (score < threshold) continue;
+      out.push({
+        id: box.id,
+        x1: box.x1 ?? box.x,
+        y1: box.y1 ?? box.y,
+        x2: box.x2 ?? (box.x + box.w),
+        y2: box.y2 ?? (box.y + box.h),
+        w: box.w,
+        h: box.h,
+        score,
+        vis: box.vis,
+        layer: name,
+        color: settings.color || "#35e6fd",
+        draw_id: settings.draw_id !== false,
+        draw_score: settings.draw_score === true,
+      });
+    }
+  }
+  return out;
+}
+
+function refreshCurrentBoxes() {
+  if (currentMotFrame !== null && currentMotFrame !== undefined && annotationPayload) {
+    currentBoxes = flattenBoxesForFrame(currentMotFrame);
+    updateLockedBoxInfo();
+    updateNavUI();
+  }
+}
+
+function updateLayerState(name, patch) {
+  layerState[name] = Object.assign({}, getLayerSettings(name), patch);
+  refreshCurrentBoxes();
+  populateExportLayers();
+  drawScene();
+}
+
 function getParams() {
   const dataset = datasetSelect.value;
   const split = splitSelect.value;
@@ -198,8 +283,10 @@ function updateNavUI() {
   const dataset = datasetSelect.value;
   const split = splitSelect.value;
   const seq = seqSelect.value || "(no seq)";
-  const annotationLabel = `${annotationTypeSelect.value}:${annotationFileSelect.value || "-"}`;
-  viewerInfo.textContent = `${dataset}/${split}/${seq} | ${annotationLabel} | frame_idx: ${idx} / ${maxV} | mot: ${currentMotFrame ?? "-"}`;
+  const layerLabel = annotationPayload && annotationPayload.layers
+    ? `${visibleLayerNames().length}/${annotationPayload.layers.length} layers`
+    : `${annotationTypeSelect.value}:${annotationFileSelect.value || "-"}`;
+  viewerInfo.textContent = `${dataset}/${split}/${seq} | ${layerLabel} | frame_idx: ${idx} / ${maxV} | mot: ${currentMotFrame ?? "-"}`;
 }
 
 function updateFrameHint() {
@@ -213,8 +300,80 @@ function updateFrameHint() {
   updateNavUI();
 }
 
+function renderLayerControls() {
+  layerControls.innerHTML = "";
+  if (!annotationPayload || !annotationPayload.layers || annotationPayload.layers.length === 0) {
+    layerControls.innerHTML = `<div class="hint">No annotation layers configured or discovered.</div>`;
+    layerWarnings.textContent = "";
+    return;
+  }
+
+  for (const layer of annotationPayload.layers) {
+    const settings = getLayerSettings(layer.name);
+    const item = document.createElement("div");
+    item.className = "layerItem";
+    const key = layerKey(layer.name);
+    item.innerHTML = `
+      <div class="layerHeader">
+        <span class="layerSwatch" style="background:${settings.color}"></span>
+        <span class="layerName" title="${layer.name}">${layer.name}</span>
+        <input type="color" id="layerColor_${key}" value="${settings.color || "#35e6fd"}" />
+      </div>
+      <div class="layerOptions">
+        <label class="check"><input type="checkbox" id="layerVisible_${key}" ${settings.visible !== false ? "checked" : ""} /> Visible</label>
+        <label class="check"><input type="checkbox" id="layerDrawId_${key}" ${settings.draw_id !== false ? "checked" : ""} /> ID</label>
+        <label class="check"><input type="checkbox" id="layerDrawScore_${key}" ${settings.draw_score === true ? "checked" : ""} /> Score</label>
+        <label>Min score: <span id="layerThresholdText_${key}">${(parseFloat(settings.score_threshold || 0) || 0).toFixed(2)}</span></label>
+        <input type="range" id="layerThreshold_${key}" min="0" max="1" step="0.01" value="${parseFloat(settings.score_threshold || 0) || 0}" />
+      </div>
+    `;
+    layerControls.appendChild(item);
+
+    document.getElementById(`layerColor_${key}`).addEventListener("input", (e) => {
+      updateLayerState(layer.name, { color: e.target.value });
+      renderLayerControls();
+    });
+    document.getElementById(`layerVisible_${key}`).addEventListener("change", (e) => {
+      updateLayerState(layer.name, { visible: e.target.checked });
+    });
+    document.getElementById(`layerDrawId_${key}`).addEventListener("change", (e) => {
+      updateLayerState(layer.name, { draw_id: e.target.checked });
+    });
+    document.getElementById(`layerDrawScore_${key}`).addEventListener("change", (e) => {
+      updateLayerState(layer.name, { draw_score: e.target.checked });
+    });
+    document.getElementById(`layerThreshold_${key}`).addEventListener("input", (e) => {
+      const value = parseFloat(e.target.value) || 0;
+      document.getElementById(`layerThresholdText_${key}`).textContent = value.toFixed(2);
+      updateLayerState(layer.name, { score_threshold: value });
+    });
+  }
+
+  const warnings = annotationPayload.warnings || [];
+  layerWarnings.textContent = warnings.length
+    ? `${warnings.length} annotation warning(s). First: ${warnings[0]}`
+    : "";
+}
+
+function populateExportLayers() {
+  exportLayerList.innerHTML = "";
+  if (!annotationPayload || !annotationPayload.layers) return;
+  for (const layer of annotationPayload.layers) {
+    const settings = getLayerSettings(layer.name);
+    const key = layerKey(`export_${layer.name}`);
+    const label = document.createElement("label");
+    label.className = "check";
+    label.innerHTML = `<input type="checkbox" id="${key}" value="${layer.name}" ${settings.visible !== false ? "checked" : ""} /> ${layer.name}`;
+    exportLayerList.appendChild(label);
+  }
+}
+
 // ---- playback control ----
 function startPlayback() {
+  if (playbackModeSelect.value === "smooth") {
+    startSmoothPlayback();
+    return;
+  }
   const maxV = parseInt(frameSlider.max || "0", 10);
   if (maxV <= 0) return;
 
@@ -246,6 +405,13 @@ function stopPlayback() {
     clearInterval(playbackIntervalId);
     playbackIntervalId = null;
   }
+  if (sequenceVideo) {
+    sequenceVideo.pause();
+  }
+  if (videoAnimationId !== null) {
+    cancelAnimationFrame(videoAnimationId);
+    videoAnimationId = null;
+  }
   playBtn.disabled = false;
   stopBtn.disabled = true;
 }
@@ -256,8 +422,100 @@ function updatePlaybackSpeed() {
   
   // If playing, restart with new speed
   if (isPlaying) {
+    if (playbackModeSelect.value === "smooth") {
+      sequenceVideo.playbackRate = speed;
+    } else {
+      stopPlayback();
+      startPlayback();
+    }
+  }
+}
+
+function updatePlaybackModeUI() {
+  const smooth = playbackModeSelect.value === "smooth";
+  videoStage.style.display = smooth ? "block" : "none";
+  canvas.style.display = smooth ? "none" : "block";
+  document.querySelector(".zoomControlsOverlay").style.display = smooth ? "none" : "flex";
+  minimapOverlay.style.display = smooth ? "none" : minimapOverlay.style.display;
+  if (smooth) {
+    loadSmoothVideo().catch((e) => setStatus(`Video error: ${e.message}`));
+  } else {
     stopPlayback();
-    startPlayback();
+    loadFrameImageAndBoxes();
+  }
+}
+
+async function loadSmoothVideo() {
+  const dataset = datasetSelect.value;
+  const split = splitSelect.value;
+  const seq = seqSelect.value;
+  if (!seq) throw new Error("No sequence selected");
+  if (!annotationPayload) await loadAnnotationPayload();
+  const payload = await fetchJSON(
+    `/api/video/${encodeURIComponent(dataset)}/${encodeURIComponent(split)}/${encodeURIComponent(seq)}`
+  );
+  videoInfo = payload;
+  if (!payload.available) {
+    throw new Error(payload.error || "video cache unavailable");
+  }
+  if (!sequenceVideo.src.endsWith(payload.video_url)) {
+    sequenceVideo.src = payload.video_url;
+  }
+  sequenceVideo.playbackRate = parseFloat(playbackSpeed.value) || 1;
+  setStatus("Smooth video ready");
+}
+
+async function startSmoothPlayback() {
+  try {
+    await loadSmoothVideo();
+    isPlaying = true;
+    playBtn.disabled = true;
+    stopBtn.disabled = false;
+    await sequenceVideo.play();
+    drawVideoOverlayLoop();
+  } catch (e) {
+    setStatus(`Video error: ${e.message}`);
+    stopPlayback();
+  }
+}
+
+function drawVideoOverlayLoop() {
+  drawVideoOverlay();
+  if (isPlaying || !sequenceVideo.paused) {
+    videoAnimationId = requestAnimationFrame(drawVideoOverlayLoop);
+  }
+}
+
+function drawVideoOverlay() {
+  if (!videoInfo || !annotationPayload || !sequenceVideo.videoWidth || !sequenceVideo.videoHeight) return;
+  if (videoOverlayCanvas.width !== sequenceVideo.videoWidth || videoOverlayCanvas.height !== sequenceVideo.videoHeight) {
+    videoOverlayCanvas.width = sequenceVideo.videoWidth;
+    videoOverlayCanvas.height = sequenceVideo.videoHeight;
+  }
+  videoOverlayCtx.clearRect(0, 0, videoOverlayCanvas.width, videoOverlayCanvas.height);
+  if (!showGT.checked || !showBBox.checked) return;
+  const fps = parseFloat(videoInfo.fps || annotationPayload.fps || 25);
+  const firstFrame = parseInt(videoInfo.first_frame || annotationPayload.first_frame || 1, 10);
+  const frame = Math.floor(sequenceVideo.currentTime * fps) + firstFrame;
+  const boxes = flattenBoxesForFrame(frame);
+  for (const b of boxes) {
+    const rgb = hexToRgb(b.color || boxColor.value);
+    videoOverlayCtx.strokeStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
+    videoOverlayCtx.lineWidth = 2;
+    videoOverlayCtx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+    const labels = [];
+    if (showID.checked && b.draw_id !== false) labels.push(`id:${b.id}`);
+    if (b.draw_score === true) labels.push(`s:${b.score.toFixed(2)}`);
+    if (labels.length) {
+      videoOverlayCtx.font = `${ID_FONT_PX}px Arial`;
+      videoOverlayCtx.lineWidth = 4;
+      videoOverlayCtx.strokeStyle = "rgba(0,0,0,0.55)";
+      videoOverlayCtx.fillStyle = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
+      const x = Math.max(0, b.x1);
+      const y = Math.max(ID_FONT_PX, b.y1 - 6);
+      videoOverlayCtx.strokeText(labels.join(" "), x, y);
+      videoOverlayCtx.fillText(labels.join(" "), x, y);
+    }
   }
 }
 
@@ -487,12 +745,12 @@ function drawTextWithOutline(text, x, y, fillStyle, fontPx, alpha = 1.0) {
 
 function drawAllBoxes(dimAll = false, dimFactor = 1.0) {
   if (!showGT.checked) return;
-  const base = hexToRgb(boxColor.value);
   const visRgb = hexToRgb(visColor.value);
   const mode = getRadio("colorMode", "fixed");
 
   for (let i = 0; i < currentBoxes.length; i++) {
     const b = currentBoxes[i];
+    const base = hexToRgb(b.color || boxColor.value);
 
     const strength = computeStrength(b.vis, mode);
     let fillAlpha = strength.fillAlpha;
@@ -524,14 +782,28 @@ function drawAllBoxes(dimAll = false, dimFactor = 1.0) {
 
     // labels always show
     const idText = `id:${b.id}`;
+    const scoreText = `s:${(typeof b.score === "number" ? b.score : 1.0).toFixed(2)}`;
     const visText = (typeof b.vis === "number" && b.vis >= 0) ? `v:${b.vis.toFixed(2)}` : "v:NA";
 
     // ID position: above box left
-    if (showID.checked) {
+    if (showID.checked && b.draw_id !== false) {
       const x = Math.max(0, b.x1);
       const y = Math.max(ID_FONT_PX, b.y1 - 6);
       drawTextWithOutline(
         idText,
+        x,
+        y,
+        `rgb(${rgb.r},${rgb.g},${rgb.b})`,
+        ID_FONT_PX,
+        dimAll ? dimFactor : 1.0
+      );
+    }
+
+    if (b.draw_score === true) {
+      const x = Math.max(0, b.x1);
+      const y = Math.max(ID_FONT_PX * 2, b.y1 + ID_FONT_PX);
+      drawTextWithOutline(
+        scoreText,
         x,
         y,
         `rgb(${rgb.r},${rgb.g},${rgb.b})`,
@@ -570,10 +842,10 @@ function drawHoveredBoxOnTop() {
   if (!showGT.checked) return;
   if (hoveredIndex < 0 || hoveredIndex >= currentBoxes.length) return;
 
-  const base = hexToRgb(boxColor.value);
+  const b = currentBoxes[hoveredIndex];
+  const base = hexToRgb(b.color || boxColor.value);
   const visRgb = hexToRgb(visColor.value);
   const mode = getRadio("colorMode", "fixed");
-  const b = currentBoxes[hoveredIndex];
 
   const strength = computeStrength(b.vis, mode);
   const rgb = getBoxRgb(b, base);
@@ -597,12 +869,19 @@ function drawHoveredBoxOnTop() {
 
   // texts (full alpha)
   const idText = `id:${b.id}`;
+  const scoreText = `s:${(typeof b.score === "number" ? b.score : 1.0).toFixed(2)}`;
   const visText = (typeof b.vis === "number" && b.vis >= 0) ? `v:${b.vis.toFixed(2)}` : "v:NA";
 
-  if (showID.checked) {
+  if (showID.checked && b.draw_id !== false) {
     const x = Math.max(0, b.x1);
     const y = Math.max(ID_FONT_PX, b.y1 - 6);
     drawTextWithOutline(idText, x, y, `rgb(${rgb.r},${rgb.g},${rgb.b})`, ID_FONT_PX, 1.0);
+  }
+
+  if (b.draw_score === true) {
+    const x = Math.max(0, b.x1);
+    const y = Math.max(ID_FONT_PX * 2, b.y1 + ID_FONT_PX);
+    drawTextWithOutline(scoreText, x, y, `rgb(${rgb.r},${rgb.g},${rgb.b})`, ID_FONT_PX, 1.0);
   }
 
   if (showVis.checked) {
@@ -629,17 +908,17 @@ function drawHoveredBoxOnTop() {
   // hover info bar
   const bbStr = `bbox=(${b.x1.toFixed(0)},${b.y1.toFixed(0)},${(b.x2-b.x1).toFixed(0)},${(b.y2-b.y1).toFixed(0)})`;
   const vStr = (typeof b.vis === "number" && b.vis >= 0) ? `vis=${b.vis.toFixed(2)}` : "vis=NA";
-  hoverInfo.textContent = `Hover: id=${b.id} | ${vStr} | ${bbStr}`;
+  hoverInfo.textContent = `Hover: ${b.layer || "layer"} id=${b.id} | ${vStr} | ${bbStr}`;
 }
 
 function drawLockedBoxOnTop() {
   if (!showGT.checked) return;
   if (lockedBoxIndex < 0 || lockedBoxIndex >= currentBoxes.length) return;
 
-  const base = hexToRgb(boxColor.value);
+  const b = currentBoxes[lockedBoxIndex];
+  const base = hexToRgb(b.color || boxColor.value);
   const visRgb = hexToRgb(visColor.value);
   const mode = getRadio("colorMode", "fixed");
-  const b = currentBoxes[lockedBoxIndex];
 
   const strength = computeStrength(b.vis, mode);
   const rgb = getBoxRgb(b, base);
@@ -663,12 +942,19 @@ function drawLockedBoxOnTop() {
 
   // texts (full alpha)
   const idText = `id:${b.id}`;
+  const scoreText = `s:${(typeof b.score === "number" ? b.score : 1.0).toFixed(2)}`;
   const visText = (typeof b.vis === "number" && b.vis >= 0) ? `v:${b.vis.toFixed(2)}` : "v:NA";
 
-  if (showID.checked) {
+  if (showID.checked && b.draw_id !== false) {
     const x = Math.max(0, b.x1);
     const y = Math.max(ID_FONT_PX, b.y1 - 6);
     drawTextWithOutline(idText, x, y, `rgb(${rgb.r},${rgb.g},${rgb.b})`, ID_FONT_PX, 1.0);
+  }
+
+  if (b.draw_score === true) {
+    const x = Math.max(0, b.x1);
+    const y = Math.max(ID_FONT_PX * 2, b.y1 + ID_FONT_PX);
+    drawTextWithOutline(scoreText, x, y, `rgb(${rgb.r},${rgb.g},${rgb.b})`, ID_FONT_PX, 1.0);
   }
 
   if (showVis.checked) {
@@ -695,7 +981,7 @@ function drawLockedBoxOnTop() {
   // locked info bar
   const bbStr = `bbox=(${b.x1.toFixed(0)},${b.y1.toFixed(0)},${(b.x2-b.x1).toFixed(0)},${(b.y2-b.y1).toFixed(0)})`;
   const vStr = (typeof b.vis === "number" && b.vis >= 0) ? `vis=${b.vis.toFixed(2)}` : "vis=NA";
-  hoverInfo.textContent = `Locked: id=${b.id} | ${vStr} | ${bbStr}`;
+  hoverInfo.textContent = `Locked: ${b.layer || "layer"} id=${b.id} | ${vStr} | ${bbStr}`;
 }
 
 function drawScene() {
@@ -1003,11 +1289,17 @@ async function loadFrameImageAndBoxes() {
 
       currentImage = img;
       currentMotFrame = boxJson.mot_frame ?? null;
-      currentBoxes = (boxJson.boxes || []).map(b => ({
-        id: b.id,
-        x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2,
-        vis: b.vis
-      }));
+      currentBoxes = annotationPayload
+        ? flattenBoxesForFrame(currentMotFrame)
+        : (boxJson.boxes || []).map(b => ({
+          id: b.id,
+          x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2,
+          vis: b.vis,
+          score: 1.0,
+          color: boxColor.value,
+          draw_id: true,
+          draw_score: false,
+        }));
 
       hoveredIndex = -1;
       lockedBoxIndex = -1;
@@ -1114,6 +1406,29 @@ async function loadAnnotationFiles() {
   annotationHint.textContent = files.length > 0
     ? `${nextType.toUpperCase()} files from this sequence.`
     : `No ${nextType.toUpperCase()} files found in this sequence.`;
+}
+
+async function loadAnnotationPayload() {
+  const dataset = datasetSelect.value;
+  const split = splitSelect.value;
+  const seq = seqSelect.value;
+  annotationPayload = null;
+  layerState = {};
+  layerControls.innerHTML = "";
+  layerWarnings.textContent = "";
+  populateExportLayers();
+  if (!seq) return null;
+
+  const payload = await fetchJSON(
+    `/api/annotations?dataset=${encodeURIComponent(dataset)}&split=${encodeURIComponent(split)}&seq=${encodeURIComponent(seq)}`
+  );
+  annotationPayload = payload;
+  for (const layer of (payload.layers || [])) {
+    layerState[layer.name] = Object.assign({}, layer);
+  }
+  renderLayerControls();
+  populateExportLayers();
+  return payload;
 }
 
 function refreshAnnotationFileOptions() {
@@ -1263,18 +1578,88 @@ async function loadFrameInfo() {
   return info;
 }
 
+function updateExportFormatOptions() {
+  const target = exportTarget.value;
+  const formats = target === "video" ? ["mp4"] : ["jpg", "jpeg", "png", "svg"];
+  const previous = exportFormat.value;
+  exportFormat.innerHTML = "";
+  for (const fmt of formats) {
+    const opt = document.createElement("option");
+    opt.value = fmt;
+    opt.textContent = fmt.toUpperCase();
+    exportFormat.appendChild(opt);
+  }
+  exportFormat.value = formats.includes(previous) ? previous : formats[0];
+}
+
+function selectedExportLayers(mode) {
+  if (mode === "none") return [];
+  if (mode === "visible") return visibleLayerNames();
+  const selected = [];
+  for (const input of exportLayerList.querySelectorAll("input[type='checkbox']")) {
+    if (input.checked) selected.push(input.value);
+  }
+  return selected;
+}
+
+function currentExportFrame() {
+  if (currentMotFrame !== null && currentMotFrame !== undefined) return currentMotFrame;
+  const idx = parseInt(frameSlider.value || "0", 10);
+  const first = lastFrameInfo && lastFrameInfo.min_frame ? parseInt(lastFrameInfo.min_frame, 10) : 1;
+  return first + idx;
+}
+
+async function runExport() {
+  const target = exportTarget.value;
+  const mode = getRadio("exportAnnotationMode", "visible");
+  const payload = {
+    dataset: datasetSelect.value,
+    split: splitSelect.value,
+    sequence: seqSelect.value,
+    frame: currentExportFrame(),
+    include_annotations: mode !== "none",
+    annotation_mode: mode,
+    selected_layers: selectedExportLayers(mode),
+    format: exportFormat.value,
+    fps: annotationPayload ? annotationPayload.fps : 25,
+  };
+  const endpoints = {
+    frame: "/api/export/frame",
+    images: "/api/export/sequence/images",
+    video: "/api/export/sequence/video",
+  };
+  try {
+    exportBtn.disabled = true;
+    exportStatus.textContent = "Exporting...";
+    const result = await postJSON(endpoints[target], payload);
+    if (!result.available) throw new Error(result.error || "Export unavailable");
+    exportStatus.innerHTML = `<a class="exportLink" href="${result.download_url}">Download export</a>`;
+  } catch (e) {
+    exportStatus.textContent = `Export failed: ${e.message}`;
+  } finally {
+    exportBtn.disabled = false;
+  }
+}
+
 async function refreshAll() {
   try {
     setStatus("Loading...");
+    videoInfo = null;
+    sequenceVideo.removeAttribute("src");
     await loadSplits();
     await loadSequences();
     await loadAnnotationFiles();
+    await loadAnnotationPayload();
     const info = await loadFrameInfo();
     await loadVisNot1Frames();
     await loadMeta();
     setStatus(`Loaded. frames=${info.count || 0}`);
     frameInput.value = "";
-    loadFrameImageAndBoxes();
+    if (playbackModeSelect.value === "smooth") {
+      updatePlaybackModeUI();
+    } else {
+      loadFrameImageAndBoxes();
+    }
   } catch (e) {
     setStatus(`Error: ${e.message}`);
   }
@@ -1290,6 +1675,12 @@ function stepFrame(delta) {
   frameSlider.value = next;
   frameInput.value = "";
   updateFrameHint();
+  if (playbackModeSelect.value === "smooth" && videoInfo) {
+    const fps = parseFloat(videoInfo.fps || 25);
+    sequenceVideo.currentTime = next / fps;
+    drawVideoOverlay();
+    return;
+  }
   loadFrameImageAndBoxes();
 }
 
@@ -1325,14 +1716,18 @@ splitSelect.addEventListener("change", () => {
   (async () => {
     try {
       setStatus("Loading...");
+      videoInfo = null;
+      sequenceVideo.removeAttribute("src");
       await loadSequences();
       await loadAnnotationFiles();
+      await loadAnnotationPayload();
       const info = await loadFrameInfo();
       await loadVisNot1Frames();
       await loadMeta();
       setStatus(`Loaded. frames=${info.count || 0}`);
       frameInput.value = "";
-      loadFrameImageAndBoxes();
+      if (playbackModeSelect.value === "smooth") updatePlaybackModeUI();
+      else loadFrameImageAndBoxes();
     } catch (e) {
       setStatus(`Error: ${e.message}`);
     }
@@ -1343,13 +1738,17 @@ seqSelect.addEventListener("change", async () => {
   try {
     stopPlayback();
     setStatus("Loading frames...");
+    videoInfo = null;
+    sequenceVideo.removeAttribute("src");
     await loadAnnotationFiles();
+    await loadAnnotationPayload();
     const info = await loadFrameInfo();
     await loadVisNot1Frames();
     await loadMeta();
     setStatus(`Loaded. frames=${info.count || 0}`);
     frameInput.value = "";
-    loadFrameImageAndBoxes();
+    if (playbackModeSelect.value === "smooth") updatePlaybackModeUI();
+    else loadFrameImageAndBoxes();
   } catch (e) {
     setStatus(`Error: ${e.message}`);
   }
@@ -1358,6 +1757,7 @@ seqSelect.addEventListener("change", async () => {
 annotationTypeSelect.addEventListener("change", async () => {
   try {
     await loadAnnotationFiles();
+    await loadAnnotationPayload();
     await loadVisNot1Frames();
     loadFrameImageAndBoxes();
   } catch (e) {
@@ -1377,6 +1777,13 @@ annotationFileSelect.addEventListener("change", async () => {
 // slider realtime
 frameSlider.addEventListener("input", () => {
   updateFrameHint();
+  if (playbackModeSelect.value === "smooth" && videoInfo) {
+    const idx = parseInt(frameSlider.value || "0", 10);
+    const fps = parseFloat(videoInfo.fps || 25);
+    sequenceVideo.currentTime = idx / fps;
+    drawVideoOverlay();
+    return;
+  }
   renderThrottled();
 });
 
@@ -1417,6 +1824,13 @@ nextBtn.addEventListener("click", () => stepFrame(1));
 playBtn.addEventListener("click", startPlayback);
 stopBtn.addEventListener("click", stopPlayback);
 playbackSpeed.addEventListener("input", updatePlaybackSpeed);
+playbackSpeed.addEventListener("change", updatePlaybackSpeed);
+playbackModeSelect.addEventListener("change", updatePlaybackModeUI);
+exportTarget.addEventListener("change", updateExportFormatOptions);
+exportBtn.addEventListener("click", runExport);
+document.querySelectorAll('input[name="exportAnnotationMode"]').forEach(el => {
+  el.addEventListener("change", populateExportLayers);
+});
 
 zoomInput.addEventListener("input", applyZoom);
 zoomResetBtn.addEventListener("click", resetZoom);
@@ -1572,6 +1986,8 @@ document.addEventListener("keydown", (e) => {
 (async function init() {
   try {
     await loadDatasets();
+    updateExportFormatOptions();
+    updatePlaybackSpeed();
     await refreshAll();
     updateZoomButtonsUI();
   } catch (e) {

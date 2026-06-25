@@ -46,7 +46,7 @@
       </div>
 
       <div class="group">
-        <label>Annotation Type</label>
+        <label>Legacy Annotation Type</label>
         <select id="annotationTypeSelect">
           <option value="gt">GT</option>
           <option value="det">DET</option>
@@ -54,9 +54,15 @@
       </div>
 
       <div class="group">
-        <label>Annotation File</label>
+        <label>Legacy Annotation File</label>
         <select id="annotationFileSelect"></select>
-        <div class="hint" id="annotationHint">Choose a GT or DET file from this sequence.</div>
+        <div class="hint" id="annotationHint">Used as a fallback for single-file frame inspection.</div>
+      </div>
+
+      <div class="group">
+        <label>Annotation Layers</label>
+        <div id="layerControls" class="layerControls"></div>
+        <div id="layerWarnings" class="hint"></div>
       </div>
 
       <div class="group">
@@ -66,7 +72,7 @@
       </div>
 
       <div class="group">
-        <label class="check"><input type="checkbox" id="showGT" checked /> Show GT</label>
+        <label class="check"><input type="checkbox" id="showGT" checked /> Show Annotations</label>
         <label class="check"><input type="checkbox" id="showBBox" checked /> BBox</label>
         <label class="check"><input type="checkbox" id="showID" checked /> ID</label>
         <label class="check"><input type="checkbox" id="showVis" checked /> Show Visibility Text</label>
@@ -111,13 +117,44 @@
 
       <div class="group">
         <label>Playback</label>
+        <select id="playbackModeSelect">
+          <option value="frame">Frame Inspection Mode</option>
+          <option value="smooth">Smooth Video Mode</option>
+        </select>
         <div class="row">
           <button id="playBtn" class="navBtn">▶ Play</button>
           <button id="stopBtn" class="navBtn" disabled>⏹ Stop</button>
         </div>
         <label>Playback Speed</label>
-        <input id="playbackSpeed" type="range" min="0.1" max="1" step="0.1" value="1" />
+        <select id="playbackSpeed">
+          <option value="0.25">0.25x</option>
+          <option value="0.5">0.5x</option>
+          <option value="1" selected>1x</option>
+          <option value="2">2x</option>
+          <option value="4">4x</option>
+        </select>
         <div class="hint" id="speedHint">1x</div>
+      </div>
+
+      <div class="group exportPanel">
+        <label>Export Target</label>
+        <select id="exportTarget">
+          <option value="frame">Current Frame</option>
+          <option value="images">Whole Sequence as Images ZIP</option>
+          <option value="video">Whole Sequence as Video</option>
+        </select>
+
+        <label>Format</label>
+        <select id="exportFormat"></select>
+
+        <label>Annotations</label>
+        <label class="check"><input type="radio" name="exportAnnotationMode" value="none" /> No annotations</label>
+        <label class="check"><input type="radio" name="exportAnnotationMode" value="visible" checked /> Use currently visible layers</label>
+        <label class="check"><input type="radio" name="exportAnnotationMode" value="custom" /> Custom selected layers</label>
+
+        <div id="exportLayerList" class="exportLayerList"></div>
+        <button id="exportBtn" type="button">Export</button>
+        <div id="exportStatus" class="hint">Exports are saved under instance/exports.</div>
       </div>
 
       <div class="group">
@@ -139,6 +176,10 @@
 
       <div class="viewer">
         <div class="canvasWrap">
+          <div id="videoStage" class="videoStage" style="display: none;">
+            <video id="sequenceVideo" playsinline muted controls></video>
+            <canvas id="videoOverlayCanvas"></canvas>
+          </div>
           <canvas id="frameCanvas"></canvas>
           
           <!-- Zoom controls overlay -->

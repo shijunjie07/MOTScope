@@ -22,6 +22,21 @@ def _registry():
     return current_app.extensions["dataset_registry"]
 
 
+def _video_cache():
+    """Return the shared video cache service."""
+    return current_app.extensions["video_cache"]
+
+
+def _export_manager():
+    """Return the shared export manager."""
+    return current_app.extensions["export_manager"]
+
+
+def _download_url(path):
+    """Build a browser download URL for an exported file path."""
+    return f"/downloads/exports/{path.name}"
+
+
 @api_bp.get("/datasets")
 def api_datasets():
     """Return dataset definitions for the frontend selector."""
@@ -77,6 +92,31 @@ def api_annotation_files():
     split = request.args.get("split", "")
     seq = request.args.get("seq", "")
     return jsonify(_viewer().list_annotation_files(dataset, split, seq))
+
+
+@api_bp.get("/annotations")
+def api_annotations():
+    """Return all sequence annotations grouped by frame and layer."""
+    dataset = request.args.get("dataset")
+    split = request.args.get("split", "")
+    seq = request.args.get("seq", "")
+    if not seq:
+        return jsonify({"error": "Missing sequence"}), 400
+    try:
+        return jsonify(_viewer().annotation_payload(dataset, split, seq))
+    except FileNotFoundError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"error": f"annotation load failed: {exc}"}), 500
+
+
+@api_bp.get("/video/<dataset>/<split>/<seq>")
+def api_video(dataset: str, split: str, seq: str):
+    """Create or return a cached MP4 proxy for smooth playback."""
+    payload = _video_cache().ensure_video(dataset, split, seq)
+    public_payload = dict(payload)
+    public_payload.pop("path", None)
+    return jsonify(public_payload)
 
 
 @api_bp.get("/vis_not1_frames")
@@ -157,3 +197,48 @@ def api_frame_boxes():
     except FileNotFoundError as exc:
         abort(404, str(exc))
     return jsonify(payload)
+
+
+@api_bp.post("/export/frame")
+def api_export_frame():
+    """Export the current frame in a selected image format."""
+    payload = request.get_json(silent=True) or {}
+    try:
+        out_path = _export_manager().export_frame(payload)
+    except ValueError as exc:
+        return jsonify({"available": False, "error": str(exc)}), 400
+    except FileNotFoundError as exc:
+        return jsonify({"available": False, "error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"available": False, "error": f"frame export failed: {exc}"}), 500
+    return jsonify({"available": True, "download_url": _download_url(out_path)})
+
+
+@api_bp.post("/export/sequence/images")
+def api_export_sequence_images():
+    """Export a sequence as a ZIP of images."""
+    payload = request.get_json(silent=True) or {}
+    try:
+        out_path = _export_manager().export_images_zip(payload)
+    except ValueError as exc:
+        return jsonify({"available": False, "error": str(exc)}), 400
+    except FileNotFoundError as exc:
+        return jsonify({"available": False, "error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"available": False, "error": f"image ZIP export failed: {exc}"}), 500
+    return jsonify({"available": True, "download_url": _download_url(out_path)})
+
+
+@api_bp.post("/export/sequence/video")
+def api_export_sequence_video():
+    """Export a sequence as an MP4 video."""
+    payload = request.get_json(silent=True) or {}
+    try:
+        out_path = _export_manager().export_video(payload)
+    except ValueError as exc:
+        return jsonify({"available": False, "error": str(exc)}), 400
+    except FileNotFoundError as exc:
+        return jsonify({"available": False, "error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"available": False, "error": f"video export failed: {exc}"}), 500
+    return jsonify({"available": True, "download_url": _download_url(out_path)})

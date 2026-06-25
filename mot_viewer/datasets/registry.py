@@ -8,7 +8,7 @@ import json
 import re
 from pathlib import Path
 
-from .models import DatasetDefinition
+from .models import AnnotationLayer, DatasetDefinition
 
 
 def _default_builtin_datasets() -> dict[str, DatasetDefinition]:
@@ -108,8 +108,68 @@ class DatasetRegistry:
             gt_files=gt_files,
             seqinfo_filename=(payload.get("seqinfo_filename") or "seqinfo.ini").strip(),
             gameinfo_filename=(payload.get("gameinfo_filename") or "gameinfo.ini").strip(),
+            annotation_layers=self._normalize_annotation_layers(payload.get("annotation_layers", [])),
             source=source,
         )
+
+    def _normalize_annotation_layers(self, value) -> list[AnnotationLayer]:
+        """Normalize optional multi-layer annotation configuration.
+
+        Args:
+            value: Raw ``annotation_layers`` list from JSON.
+
+        Returns:
+            list[AnnotationLayer]: Valid layer definitions. Empty means the
+            viewer should derive backward-compatible defaults from ``gt_files``.
+        """
+        if not isinstance(value, list):
+            return []
+
+        layers: list[AnnotationLayer] = []
+        used_names: set[str] = set()
+        for idx, item in enumerate(value, start=1):
+            if not isinstance(item, dict):
+                continue
+            layer_type = str(item.get("type") or "gt").strip().lower()
+            if layer_type not in {"gt", "det", "tracker", "result", "custom"}:
+                layer_type = "custom"
+            name = str(item.get("name") or f"Layer {idx}").strip()
+            if not name:
+                name = f"Layer {idx}"
+            original = name
+            suffix = 2
+            while name in used_names:
+                name = f"{original} {suffix}"
+                suffix += 1
+            used_names.add(name)
+
+            raw_threshold = item.get("score_threshold", 0.0)
+            try:
+                score_threshold = float(raw_threshold)
+            except (TypeError, ValueError):
+                score_threshold = 0.0
+
+            layers.append(
+                AnnotationLayer(
+                    name=name,
+                    type=layer_type,
+                    path=str(item.get("path") or "").strip(),
+                    color=self._normalize_color(item.get("color"), idx),
+                    visible=bool(item.get("visible", True)),
+                    draw_id=bool(item.get("draw_id", layer_type != "det")),
+                    draw_score=bool(item.get("draw_score", layer_type == "det")),
+                    score_threshold=score_threshold,
+                )
+            )
+        return layers
+
+    def _normalize_color(self, value, idx: int) -> str:
+        """Return a usable CSS hex color for a layer."""
+        text = str(value or "").strip()
+        if re.fullmatch(r"#[0-9a-fA-F]{6}", text):
+            return text
+        defaults = ["#00ff00", "#ff9900", "#35e6fd", "#ff4d4d", "#d8b4fe"]
+        return defaults[(idx - 1) % len(defaults)]
 
     def _validate_name(self, value: str) -> str:
         """Validate and normalize a dataset name.

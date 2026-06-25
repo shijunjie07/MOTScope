@@ -29,7 +29,11 @@ The viewer supports common MOT-style datasets such as SoccerNet-Tracking and Dan
 ## Features
 
 - Browse MOT image sequences frame by frame  
-- Visualize bounding boxes and track IDs  
+- Visualize multiple annotation layers with independent colors
+- Show GT, detections, tracker results, or custom MOT-style files together
+- Toggle layers, IDs, scores, and score thresholds in the browser
+- Use smooth video playback through a cached MP4 with canvas overlays
+- Export frames, image-sequence ZIPs, and MP4 videos
 - Switch between multiple datasets in the browser  
 - Register new datasets without modifying source code  
 - Configure dataset-specific layouts (splits, folders, filenames)  
@@ -60,14 +64,14 @@ cd mot-viewer
 ### 2. Create environment
 
 ```bash
-conda create -n mot-viewer python=3.11 -y
-conda activate mot-viewer
+conda create -n motviewer python=3.11 -y
+conda activate motviewer
 ```
 
 ### 3. Install dependencies
 
 ```bash
-pip install -e .
+pip install -r requirements.txt
 ```
 
 
@@ -135,6 +139,69 @@ Edit `instance/datasets.json` manually:
 ```
 
 Datasets are loaded at startup, and changes from the UI are written back to this file.
+
+
+## Multiple Annotation Layers
+
+Existing configs that only define `gt_files` still work. To show GT and detections together, add `annotation_layers` to a dataset entry:
+
+```json
+{
+  "name": "sportsmot",
+  "root": "/path/to/SportsMOT/dataset",
+  "splits": ["train", "val", "test"],
+  "image_dir": "img1",
+  "gt_files": ["gt.txt"],
+  "annotation_layers": [
+    {
+      "name": "Ground Truth",
+      "type": "gt",
+      "path": "gt/gt.txt",
+      "color": "#00ff00",
+      "visible": true,
+      "draw_id": true,
+      "draw_score": false
+    },
+    {
+      "name": "Detections",
+      "type": "det",
+      "path": "det/det.txt",
+      "color": "#ff9900",
+      "visible": true,
+      "draw_id": false,
+      "draw_score": true,
+      "score_threshold": 0.0
+    }
+  ]
+}
+```
+
+Layer paths are relative to each sequence folder, such as `<dataset-root>/<split>/<sequence>/gt/gt.txt`. If `annotation_layers` is omitted, the viewer derives a Ground Truth layer from `gt_files` and, when present, a Detections layer from `det/det.txt`.
+
+
+## Smooth Video Playback
+
+The viewer has two playback modes:
+
+* **Frame Inspection Mode** keeps precise image-by-image navigation, stepping, zoom, hover, and locked-box inspection.
+* **Smooth Video Mode** generates a cached MP4 under `instance/video_cache/`, plays it in a `<video>` element, and draws selected annotation layers on a canvas overlay.
+
+Smooth playback requires `ffmpeg` on the system path. If `ffmpeg` is missing or video generation fails, the API returns a clear error and frame inspection remains usable.
+
+
+## Exporting
+
+Use the Export panel to choose a target, annotation mode, selected layers, and format. Generated files are written under `instance/exports/` and returned as browser download links.
+
+Supported formats:
+
+| Export Target | Formats |
+| --- | --- |
+| Current Frame | `jpg`, `jpeg`, `png`, `svg` |
+| Whole Sequence as Images ZIP | `jpg`, `jpeg`, `png`, `svg` |
+| Whole Sequence as Video | `mp4` |
+
+SVG exports embed the original frame image and draw boxes/text as real SVG elements.
 
 
 
